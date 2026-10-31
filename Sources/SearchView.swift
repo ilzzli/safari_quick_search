@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 struct SearchView: View {
@@ -50,6 +51,17 @@ struct SearchView: View {
                 Text("SAFARI QUICK SEARCH 1.6").font(.system(size: 10, weight: .semibold, design: .rounded))
                 Spacer()
                 Menu {
+                    Toggle("Launch at Login", isOn: Binding(
+                        get: { model.loginItemStatus == .enabled },
+                        set: { model.setLaunchAtLogin($0) }
+                    ))
+                    .disabled(model.updatingLoginItem)
+                    if model.loginItemStatus == .requiresApproval {
+                        Button("Approve in Login Items Settings…") {
+                            SMAppService.openSystemSettingsLoginItems()
+                        }
+                    }
+                    Divider()
                     Button("Full Disk Access Setup…", action: showSetup)
                     Button("Choose History Database…", action: chooseDatabase)
                     Button("Use Default Safari Database", action: resetDatabase)
@@ -74,6 +86,14 @@ struct SearchView: View {
         }
         .frame(width: 700, height: 500)
         .modifier(PanelGlassSurface())
+        .alert("Could Not Update Launch at Login", isPresented: Binding(
+            get: { model.loginItemError != nil },
+            set: { if !$0 { model.loginItemError = nil } }
+        )) {
+            Button("OK", role: .cancel) { model.loginItemError = nil }
+        } message: {
+            Text(model.loginItemError ?? "")
+        }
     }
 
     private func row(index: Int, icon: String, faviconURL: URL?, title: String, subtitle: String) -> some View {

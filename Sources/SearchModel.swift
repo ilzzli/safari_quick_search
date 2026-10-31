@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 import SwiftUI
 
 enum SearchSuggestion: Equatable {
@@ -55,6 +56,37 @@ final class SearchModel: ObservableObject {
     @Published var entries: [HistoryEntry] = []
     @Published var selected = 0
     @Published var searching = false
+    @Published private(set) var loginItemStatus = SMAppService.mainApp.status
+    @Published private(set) var updatingLoginItem = false
+    @Published var loginItemError: String?
+
+    func setLaunchAtLogin(_ enabled: Bool) {
+        guard !updatingLoginItem else { return }
+        updatingLoginItem = true
+        Task { @MainActor in
+            defer {
+                loginItemStatus = SMAppService.mainApp.status
+                updatingLoginItem = false
+            }
+            do {
+                if enabled {
+                    if SMAppService.mainApp.status == .requiresApproval {
+                        SMAppService.openSystemSettingsLoginItems()
+                    } else if SMAppService.mainApp.status != .enabled {
+                        try SMAppService.mainApp.register()
+                        if SMAppService.mainApp.status == .requiresApproval {
+                            SMAppService.openSystemSettingsLoginItems()
+                        }
+                    }
+                } else {
+                    try await SMAppService.mainApp.unregister()
+                }
+            } catch {
+                loginItemError = error.localizedDescription
+            }
+        }
+    }
+
     @Published var error: String?
     var dismiss: (() -> Void)?
     private let queue = DispatchQueue(label: "SafariQuickSearch.history", qos: .userInitiated)
@@ -96,6 +128,7 @@ final class SearchModel: ObservableObject {
 
 
     func refresh() {
+        loginItemStatus = SMAppService.mainApp.status
         ticket?.cancel()
         generation += 1
         let current = generation
