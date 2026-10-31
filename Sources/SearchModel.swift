@@ -209,7 +209,7 @@ final class SearchModel: ObservableObject {
         let destination = suggestions[selected].destination
         guard let destination, let scheme = destination.scheme?.lowercased(),
               ["http", "https"].contains(scheme), destination.host != nil else {
-            error = "This history entry is not a valid web address."
+            error = "This suggestion is not a valid HTTP or HTTPS address."
             return
         }
         guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else {

@@ -163,13 +163,13 @@ struct SearchField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(model) }
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
-        field.placeholderString = "Search Safari history or Google"
+        field.placeholderString = "Search history, enter a URL, or search Google"
         field.isBordered = false
         field.drawsBackground = false
         field.font = .systemFont(ofSize: 23, weight: .regular)
         field.focusRingType = .none
         field.delegate = context.coordinator
-        field.setAccessibilityLabel("Search Safari history or Google")
+        field.setAccessibilityLabel("Search history, enter a URL, or search Google")
         return field
     }
     func updateNSView(_ field: NSTextField, context: Context) {

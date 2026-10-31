@@ -12,5 +12,5 @@
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSAppleEventsUsageDescription</key><string>Safari Quick Search selects an existing Safari tab for the chosen URL without reloading the page.</string>
+<key>NSAppleEventsUsageDescription</key><string>Safari Quick Search checks open Safari tabs and selects one with the exact chosen URL without requesting a reload.</string>
 </dict></plist>
