@@ -4,6 +4,8 @@ import Carbon
 @MainActor
 final class HotkeyRegistration: NSObject {
     private let actions: any HotkeysActionsInterface
+    private let safari = SafariControl()
+    private let swipeMonitor = ThreeFingerSwipeMonitor()
     private var hotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private weak var trackingMenu: NSMenu?
@@ -62,6 +64,34 @@ final class HotkeyRegistration: NSObject {
             return
         }
         registerGlobalHotkey()
+        let workspace = NSWorkspace.shared.notificationCenter
+        workspace.addObserver(self, selector: #selector(updateSwipeTracking),
+                              name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(updateSwipeTracking),
+                              name: NSWorkspace.didWakeNotification, object: nil)
+        workspace.addObserver(self, selector: #selector(stopSwipeTracking),
+                              name: NSWorkspace.willSleepNotification, object: nil)
+        updateSwipeTracking()
+    }
+
+    @objc private func updateSwipeTracking() {
+        swipeMonitor.stop()
+        guard safari.isFocused else {
+            SwipeLogger.debug("Tracking disabled: Safari is not focused")
+            return
+        }
+        SwipeLogger.debug("Safari focused: enabling tracking")
+        swipeMonitor.start { [weak self] direction in
+            guard let self, self.safari.isFocused else { return }
+            switch direction {
+            case .left: self.safari.nextTabGroup()
+            case .right: self.safari.previousTabGroup()
+            }
+        }
+    }
+
+    @objc private func stopSwipeTracking() {
+        swipeMonitor.stop()
     }
 
     private func registerGlobalHotkey() {
@@ -84,6 +114,8 @@ final class HotkeyRegistration: NSObject {
     }
 
     func stop() {
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        swipeMonitor.stop()
         NotificationCenter.default.removeObserver(self)
         trackingMenu = nil
         stopMenuKeyMonitor()
