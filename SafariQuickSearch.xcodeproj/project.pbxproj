@@ -11,7 +11,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		000000000000000000000007 /* Safari Quick Search.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "Safari Quick Search.app"; path = "/Users/pre/Documents/Codex/2026-10-31/referenced-chatgpt-conversation-this-is-an/outputs/SafariQuickSearch/build/Debug/Safari Quick Search.app"; sourceTree = "<absolute>"; };
+		000000000000000000000007 /* Safari Quick Search Dev.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Safari Quick Search Dev.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		000000000000000000000009 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		000000000000000000000068 /* Resources/AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Resources/AppIcon.icns; sourceTree = "<group>"; };
@@ -38,6 +38,7 @@
 		000000000000000000000004 /* Products */ = {
 			isa = PBXGroup;
 			children = (
+				000000000000000000000007 /* Safari Quick Search Dev.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,7 +62,7 @@
 			);
 			name = SafariQuickSearch;
 			productName = "Safari Quick Search";
-			productReference = 000000000000000000000007 /* Safari Quick Search.app */;
+			productReference = 000000000000000000000007 /* Safari Quick Search Dev.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */

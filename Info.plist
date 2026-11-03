@@ -1,17 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleDevelopmentRegion</key><string>en</string>
-<key>CFBundleExecutable</key><string>Safari Quick Search</string>
-<key>CFBundleIdentifier</key><string>local.SafariQuickSearch</string>
-<key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-<key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleName</key><string>Safari Quick Search</string>
-<key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
-<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
-<key>LSMinimumSystemVersion</key><string>26.0</string>
-<key>LSUIElement</key><true/>
-<key>NSHighResolutionCapable</key><true/>
-<key>NSAppleEventsUsageDescription</key><string>Safari Quick Search selects matching Safari tabs and uses System Events to switch Safari tab groups when you swipe with three fingers.</string>
-</dict></plist>
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>Safari Quick Search</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon.icns</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.SafariQuickSearch</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Safari Quick Search</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>26.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Safari Quick Search selects matching Safari tabs and uses System Events to switch Safari tab groups when you swipe with three fingers.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

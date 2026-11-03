@@ -2,7 +2,7 @@ import SwiftUI
 
 struct PanelLayout: View {
     let actions: any AppActionsInterface
-    let history: any HistoryInterface
+    let tabSupplier: any TabSupplierInterface
     @State private var searchText = ""
 
     var body: some View {
@@ -10,7 +10,7 @@ struct PanelLayout: View {
             TextField("Search Safari history", text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .accessibilityLabel("Search Safari history")
-            HistoryList(history: history, input: searchText)
+            TabResults(supplier: tabSupplier, input: searchText)
         }
         .padding(24)
         .padding(.bottom, 48)

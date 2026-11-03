@@ -13,11 +13,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.actions.togglePanel()
         })
     )
-    private let history: any HistoryInterface = SafariHistory()
+    private let tabSupplier: any TabSupplierInterface = TabSupplier(actions: TabActions())
     private var panel: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        if let iconURL = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let icon = NSImage(contentsOf: iconURL) {
+            NSApp.applicationIconImage = icon
+        }
 
         let panel = AppPanel(
             contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
@@ -33,7 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
-        panel.contentView = NSHostingView(rootView: PanelLayout(actions: actions, history: history))
+        panel.contentView = NSHostingView(rootView: PanelLayout(actions: actions, tabSupplier: tabSupplier))
         self.panel = panel
         panel.center()
         actions.attachPanel(panel)
