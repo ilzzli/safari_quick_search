@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-struct HistoryEntry: Identifiable, Equatable {
+struct HistoryEntry: Identifiable, Equatable, Sendable {
     let id: Int64
     let title: String
     let url: String
@@ -24,7 +24,7 @@ enum HistoryError: LocalizedError {
     }
 }
 
-// Shared between the main thread and one serial database queue.
+// Shared between the history actor and task cancellation; all mutable state is locked.
 final class SearchTicket: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
@@ -77,9 +77,9 @@ struct HistoryStore {
         }, Unmanaged.passUnretained(ticket).toOpaque())
         defer { sqlite3_progress_handler(db, 0, nil, nil) }
 
-        // Match only the displayed title and the representative URL's base.
-        // Query strings, fragments, older titles and older group URLs cannot
-        // cause an unrelated row to appear. Keep the full URL for navigation.
+        // Group by URL without query strings or fragments, keeping the most
+        // recently visited URL and its title. Match only that title and base URL.
+        // Keep the full URL for navigation.
         let sql = """
         WITH without_fragments AS (
             SELECT id, url, CASE WHEN instr(url, '#') > 0
@@ -102,7 +102,7 @@ struct HistoryStore {
             GROUP BY h.id, h.url, h.base_url
         ), grouped AS (
             SELECT *, ROW_NUMBER() OVER (
-                PARTITION BY titleText COLLATE BINARY
+                PARTITION BY base_url COLLATE BINARY
                 ORDER BY last_visit DESC, id DESC
             ) AS position FROM pages
         )

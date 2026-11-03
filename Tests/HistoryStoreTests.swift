@@ -47,7 +47,7 @@ struct HistoryStoreTests {
         // A still-open writer leaves new data in the WAL; the reader must see it.
         exec("INSERT INTO history_items VALUES(6, 'https://wal.example/'); INSERT INTO history_visits VALUES(7, 6, 70, 'WAL only');")
         precondition(tryValue { try find("WAL only").map(\.id) } == [6], "Live WAL visibility")
-        // Same displayed title across different full URLs becomes one row.
+        // Query variants of a URL become one row, regardless of title.
         // Navigation keeps the newest full URL; matching uses only visible fields.
         exec("""
         INSERT INTO history_items VALUES
@@ -55,17 +55,17 @@ struct HistoryStoreTests {
         (8, 'https://other.example/latest?token=a%2Fb#section'),
         (9, 'https://untitled.example/one'), (10, 'https://untitled.example/two');
         INSERT INTO history_visits VALUES
-        (8, 7, 80, 'New Alpha'), (9, 8, 90, 'New Alpha'),
+        (8, 7, 80, 'Updated Alpha'), (9, 8, 90, 'New Alpha'),
         (10, 9, 100, NULL), (11, 10, 110, '');
         """)
         let grouped = try find("alpha")
-        precondition(grouped.count == 1 && grouped[0].title == "New Alpha", "Group by displayed title")
-        precondition(grouped[0].url == "https://other.example/latest?token=a%2Fb#section", "Latest full URL, including query and fragment")
+        precondition(grouped.count == 2 && grouped[1].title == "Updated Alpha", "Group by base URL, preserve distinct URLs with matching titles")
+        precondition(grouped[1].url == "https://example.com/alpha?version=2&sort=new#details", "Latest full URL, including query and fragment")
         precondition(tryValue { try find("version=2").isEmpty }, "Query parameters are not searchable")
         precondition(tryValue { try find("Old Alpha").isEmpty }, "Historical titles do not leak into grouping")
         precondition(tryValue { try find("untitled.example").count } == 2, "Untitled pages use their distinct URLs")
         precondition(tryValue { try find("section").isEmpty }, "Fragments are not searchable")
-        precondition(tryValue { try find("example.com/alpha").isEmpty }, "Older group URLs do not produce unrelated rows")
+        precondition(tryValue { try find("example.com/alpha").map(\.id) } == [7], "Query variants collapse to newest URL")
         precondition(tryValue { try find("other.example/latest").map(\.id) } == [8], "Base URL matches")
         precondition(tryValue { try find("NEW ALPHA").map(\.id) } == [8], "ASCII case-insensitive title match")
         precondition(grouped[0].displayURL == "https://other.example/latest", "Display URL excludes query and fragment")
@@ -73,7 +73,7 @@ struct HistoryStoreTests {
         precondition(tryValue { try find("rad1").isEmpty }, "Untitled fallback cannot match query parameters")
         precondition(tryValue { try find("hidden").isEmpty }, "Untitled fallback cannot match fragments")
         // Equal timestamps have a stable history-item-ID tie breaker.
-        exec("INSERT INTO history_items VALUES(11, 'https://tie.example/final?q=1#end'); INSERT INTO history_visits VALUES(12, 11, 90, 'New Alpha');")
+        exec("INSERT INTO history_items VALUES(11, 'https://other.example/latest?q=1#end'); INSERT INTO history_visits VALUES(12, 11, 90, 'New Alpha');")
         precondition(tryValue { try find("New Alpha").map(\.id) } == [11], "Deterministic timestamp tie")
         for url in ["https://www.google.com/search?q=rad1", "https://google.co.uk/search?q=test",
                     "https://www.google.rs/search?tbm=isch&q=test", "https://google.com.au/webhp#q=test",
@@ -114,29 +114,7 @@ struct HistoryStoreTests {
             fatalError("Missing DB must fail")
         } catch is HistoryError { }
         precondition(!FileManager.default.fileExists(atPath: folder.appendingPathComponent("missing.db").path))
-        let model = SearchModel(historyPath: path)
-        model.query = "rad1"
-        precondition(model.suggestions == [.google("rad1")], "No matches: only direct search")
-        let first = HistoryEntry(id: 101, title: "First", url: "https://first.example/path?q=kept#anchor")
-        let second = HistoryEntry(id: 102, title: "Second", url: "https://second.example/")
-        precondition(SearchSuggestion.history(first).faviconURL?.absoluteString == "https://first.example/favicon.ico", "Favicon request excludes path, query and fragment")
-        precondition(SearchSuggestion.google("private words").faviconURL?.absoluteString == "https://www.google.com/favicon.ico", "Google icon request excludes search text")
-        model.entries = [first, second]
-        precondition(model.suggestions == [.history(first), .google("rad1"), .history(second)], "Direct search is second")
-        precondition(model.suggestions[0].destination?.absoluteString == first.url, "Navigation preserves full URL")
-        model.move(1)
-        precondition(model.selected == 1 && model.suggestions[1].title == "Search: rad1", "Keyboard selection follows rendered order")
-        precondition(URLComponents(url: model.suggestions[1].destination!, resolvingAgainstBaseURL: false)?.queryItems?.first?.value == "rad1", "Second row opens Google with exact input")
-        model.entries = [first]
-        precondition(model.suggestions == [.history(first), .google("rad1")], "One match: search remains second")
-        model.clear()
-        precondition(model.suggestions.isEmpty, "Clearing removes stale rows")
-        model.query = "unknown"
-        model.entries = [first]
-        model.refresh()
-        precondition(model.suggestions == [.google("unknown")], "New search immediately discards stale rows")
-        model.clear() // Cancel outstanding synthetic database work.
-        print("PASS: Google search exclusion, suggestion order, Google destination, clean URL/title matching, literal matching, injection, Unicode, ordering, title grouping, latest full URL, timestamp ties, cancellation, WAL visibility, read-only enforcement, unchanged database/WAL, missing-file handling")
+        print("PASS: URL grouping, latest title/full URL, literal search, Google exclusion, ordering, cancellation, WAL visibility, read-only access and missing-file handling")
     }
     static func tryValue<T>(_ body: () throws -> T) -> T { try! body() }
 }

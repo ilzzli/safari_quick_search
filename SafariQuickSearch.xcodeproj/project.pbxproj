@@ -3,52 +3,41 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 70;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0000000000000000000000C8 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000064 /* App.swift */; };
-		0000000000000000000000C9 /* HistoryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000065 /* HistoryStore.swift */; };
-		0000000000000000000000CA /* SearchModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000066 /* SearchModel.swift */; };
-		0000000000000000000000CB /* SearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000067 /* SearchView.swift */; };
+		0000000000000000000000CC /* Resources/AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 000000000000000000000068 /* Resources/AppIcon.icns */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		000000000000000000000007 /* Safari Quick Search.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Safari Quick Search.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000007 /* Safari Quick Search.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; name = "Safari Quick Search.app"; path = "/Users/pre/Documents/Codex/2026-10-31/referenced-chatgpt-conversation-this-is-an/outputs/SafariQuickSearch/build/Debug/Safari Quick Search.app"; sourceTree = "<absolute>"; };
 		000000000000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		000000000000000000000009 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
-		000000000000000000000064 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
-		000000000000000000000065 /* HistoryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryStore.swift; sourceTree = "<group>"; };
-		000000000000000000000066 /* SearchModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchModel.swift; sourceTree = "<group>"; };
-		000000000000000000000067 /* SearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchView.swift; sourceTree = "<group>"; };
+		000000000000000000000068 /* Resources/AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Resources/AppIcon.icns; sourceTree = "<group>"; };
+		000000000000000000000069 /* Config/Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Version.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		3D3E2796309A608D002ECBA7 /* Sources */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = Sources; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXGroup section */
 		000000000000000000000002 = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000000003 /* Sources */,
 				000000000000000000000004 /* Products */,
 				000000000000000000000008 /* Info.plist */,
 				000000000000000000000009 /* README.md */,
+				000000000000000000000068 /* Resources/AppIcon.icns */,
+				000000000000000000000069 /* Config/Version.xcconfig */,
+				3D3E2796309A608D002ECBA7 /* Sources */,
 			);
-			sourceTree = "<group>";
-		};
-		000000000000000000000003 /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				000000000000000000000064 /* App.swift */,
-				000000000000000000000065 /* HistoryStore.swift */,
-				000000000000000000000066 /* SearchModel.swift */,
-				000000000000000000000067 /* SearchView.swift */,
-			);
-			path = Sources;
 			sourceTree = "<group>";
 		};
 		000000000000000000000004 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				000000000000000000000007 /* Safari Quick Search.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -61,10 +50,14 @@
 			buildConfigurationList = 00000000000000000000000B /* Build configuration list for PBXNativeTarget "SafariQuickSearch" */;
 			buildPhases = (
 				000000000000000000000006 /* Sources */,
+				000000000000000000000010 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3D3E2796309A608D002ECBA7 /* Sources */,
 			);
 			name = SafariQuickSearch;
 			productName = "Safari Quick Search";
@@ -98,15 +91,22 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		000000000000000000000010 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0000000000000000000000CC /* Resources/AppIcon.icns in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000000000006 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0000000000000000000000C8 /* App.swift in Sources */,
-				0000000000000000000000C9 /* HistoryStore.swift in Sources */,
-				0000000000000000000000CA /* SearchModel.swift in Sources */,
-				0000000000000000000000CB /* SearchView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -196,48 +196,61 @@
 		};
 		00000000000000000000000E /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000069 /* Config/Version.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = SafariQuickSearch.entitlements;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = N5C684FNP5;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
+				EXECUTABLE_NAME = "Safari Quick Search";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
-				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lsqlite3",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = local.SafariQuickSearch;
-				PRODUCT_NAME = "Safari Quick Search";
+				PRODUCT_NAME = "Safari Quick Search Dev";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) SQS_$(CONFIGURATION)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
 		};
 		00000000000000000000000F /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = 000000000000000000000069 /* Config/Version.xcconfig */;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				CODE_SIGN_ENTITLEMENTS = SafariQuickSearch.entitlements;
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Manual;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = N5C684FNP5;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
-				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
 					"-lsqlite3",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = local.SafariQuickSearch;
 				PRODUCT_NAME = "Safari Quick Search";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) SQS_$(CONFIGURATION)";
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
 			name = Release;

@@ -1,0 +1,3 @@
+// Shared version for Xcode and build.sh. Version metadata only; app filenames remain fixed.
+MARKETING_VERSION = 1.6
+CURRENT_PROJECT_VERSION = 7
