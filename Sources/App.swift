@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
     )
     private let tabSupplier: any TabSupplierInterface = TabSupplier(actions: TabActions())
+    private let tabGroups: any TabGroupsInterface = MockTabGroups()
     private var panel: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -37,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.isMovableByWindowBackground = true
-        panel.contentView = NSHostingView(rootView: PanelLayout(actions: actions, tabSupplier: tabSupplier))
+        panel.contentView = NSHostingView(rootView: PanelLayout(actions: actions, tabSupplier: tabSupplier, tabGroups: tabGroups))
         self.panel = panel
         panel.center()
         actions.attachPanel(panel)

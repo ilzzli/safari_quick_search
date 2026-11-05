@@ -17,13 +17,12 @@ struct TabResults: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Results")
-                .font(.headline)
-
             if let errorMessage {
                 VStack(spacing: 12) {
                     Text(errorMessage)
                         .multilineTextAlignment(.center)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                     Button("Retry") { retryID += 1 }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
