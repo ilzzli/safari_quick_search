@@ -14,7 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
     )
     private let tabSupplier: any TabSupplierInterface = TabSupplier(actions: TabActions())
-    private let tabGroups: any TabGroupsInterface = MockTabGroups()
+    private let tabGroups: any TabGroupsInterface = SafariTabGroups()
     private var panel: NSPanel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {

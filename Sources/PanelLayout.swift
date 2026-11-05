@@ -8,7 +8,7 @@ struct PanelLayout: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TabGroupsRow(window: tabGroups.currentWindow)
+            TabGroupsSection(provider: tabGroups)
                 .padding(.horizontal, 24)
                 .padding(.top, 18)
             HStack(spacing: 14) {

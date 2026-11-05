@@ -3,13 +3,19 @@ struct SafariTabGroup: Identifiable, Equatable, Sendable {
     let title: String
 }
 
-struct SafariWindowTabGroups: Sendable {
+struct SafariWindowTabGroups: Identifiable, Sendable {
+    let id: String
     let windowTitle: String
     let groups: [SafariTabGroup]
     let activeGroupID: String?
 }
 
-@MainActor
-protocol TabGroupsInterface {
-    var currentWindow: SafariWindowTabGroups { get }
+struct SafariProfileGroups: Identifiable, Sendable {
+    let id: String
+    let title: String
+    let windows: [SafariWindowTabGroups]
+}
+
+protocol TabGroupsInterface: Sendable {
+    func profiles() async throws -> [SafariProfileGroups]
 }
