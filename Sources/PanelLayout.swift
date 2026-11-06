@@ -5,10 +5,11 @@ struct PanelLayout: View {
     let tabSupplier: any TabSupplierInterface
     let tabGroups: any TabGroupsInterface
     @State private var searchText = ""
+    @State private var hoveredTab: TabItem?
 
     var body: some View {
         VStack(spacing: 0) {
-            TabGroupsSection(provider: tabGroups)
+            TabGroupsSection(provider: tabGroups, hoveredTab: hoveredTab)
                 .padding(.horizontal, 24)
                 .padding(.top, 18)
             HStack(spacing: 14) {
@@ -36,7 +37,7 @@ struct PanelLayout: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 22)
             Divider().opacity(0.45)
-            TabResults(supplier: tabSupplier, input: searchText)
+            TabResults(supplier: tabSupplier, input: searchText, hoveredTab: $hoveredTab)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider().opacity(0.45)
             HStack {

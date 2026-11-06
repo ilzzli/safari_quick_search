@@ -7,8 +7,8 @@ struct SafariTabMatch: Sendable {
     let url: String
     let groupID: Int64
     let groupName: String
-    let windowID: Int64
-    let windowUUID: String
+    let windowID: Int64?
+    let windowUUID: String?
     let activeProfileID: Int64?
     let activeProfileName: String?
     let isActiveGroup: Bool
@@ -42,6 +42,16 @@ actor TabStore {
         self.path = path
     }
 
+    // Match the same page grouping used by history, while preferring exact URLs.
+    nonisolated static func pageURL(_ url: String) -> String {
+        let base = String(url.prefix { $0 != "?" && $0 != "#" })
+        guard var components = URLComponents(string: base) else { return base }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        if components.path.isEmpty { components.path = "/" }
+        return components.string ?? base
+    }
+
     func tabs(matchingFullURL url: String) throws -> [SafariTabMatch] {
         try Task.checkCancellation()
         var connection: OpaquePointer?
@@ -52,6 +62,18 @@ actor TabStore {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 250)
+        let registered = sqlite3_create_function_v2(db, "page_url", 1,
+            SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, { context, _, arguments in
+                guard let value = arguments?[0], let text = sqlite3_value_text(value) else {
+                    sqlite3_result_null(context)
+                    return
+                }
+                let normalized = TabStore.pageURL(String(cString: text))
+                normalized.withCString {
+                    sqlite3_result_text(context, $0, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                }
+            }, nil, nil, nil)
+        guard registered == SQLITE_OK else { throw TabStoreError.query(registered) }
         let sql = """
         SELECT DISTINCT t.id, t.title, t.url, g.id, g.title,
                w.id, w.uuid, w.active_profile_id, p.title,
@@ -59,13 +81,24 @@ actor TabStore {
                CASE WHEN wtg.active_tab_id = t.id THEN 1 ELSE 0 END
         FROM bookmarks t
         JOIN bookmarks g ON g.id = t.parent
-        JOIN windows_tab_groups wtg ON wtg.tab_group_id = g.id
-        JOIN windows w ON w.id = wtg.window_id
+        LEFT JOIN windows w ON w.local_tab_group_id = g.id
+            OR EXISTS (
+                SELECT 1 FROM windows_tab_groups membership
+                WHERE membership.window_id = w.id AND membership.tab_group_id = g.id
+            )
+        LEFT JOIN windows_tab_groups wtg ON wtg.window_id = w.id AND wtg.tab_group_id = g.id
         LEFT JOIN bookmarks p ON p.id = w.active_profile_id
-        WHERE t.url = ?1 COLLATE BINARY
+        WHERE page_url(t.url) = page_url(?1) COLLATE BINARY
           AND t.deleted = 0 AND g.deleted = 0
           AND w.date_closed IS NULL
-        ORDER BY 10 DESC, 11 DESC, w.id, g.id, t.id
+          AND (w.id IS NOT NULL OR (
+              g.title = 'pinned' COLLATE NOCASE
+              AND EXISTS (
+                  SELECT 1 FROM bookmarks root
+                  WHERE root.id = g.parent AND root.parent IS NULL AND root.deleted = 0
+              )
+          ))
+        ORDER BY (t.url = ?1 COLLATE BINARY) DESC, 10 DESC, 11 DESC, w.id, g.id, t.id
         """
         var statement: OpaquePointer?
         let prepared = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
@@ -94,8 +127,9 @@ actor TabStore {
                 url: text(2) ?? url,
                 groupID: sqlite3_column_int64(statement, 3),
                 groupName: text(4) ?? "",
-                windowID: sqlite3_column_int64(statement, 5),
-                windowUUID: text(6) ?? "",
+                windowID: sqlite3_column_type(statement, 5) == SQLITE_NULL
+                    ? nil : sqlite3_column_int64(statement, 5),
+                windowUUID: text(6),
                 activeProfileID: sqlite3_column_type(statement, 7) == SQLITE_NULL
                     ? nil : sqlite3_column_int64(statement, 7),
                 activeProfileName: text(8),

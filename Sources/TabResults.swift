@@ -1,9 +1,11 @@
+import AppKit
 import SwiftUI
 
 /// Owns loading state; TabList only renders the resulting items.
 struct TabResults: View {
     let supplier: any TabSupplierInterface
     let input: String
+    @Binding var hoveredTab: TabItem?
 
     private struct Request: Equatable {
         let input: String
@@ -32,12 +34,24 @@ struct TabResults: View {
                     .opacity(isRefreshing ? 0 : 1)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                TabList(items: items, isRefreshing: isRefreshing) { tab in
+                TabList(items: items, isRefreshing: isRefreshing, hoveredTab: $hoveredTab) { tab in
                     Task { await supplier.select(tab) }
                 }
             }
         }
+        .task {
+            // Ordering an existing NSPanel front does not recreate its SwiftUI view.
+            // Reload when it becomes key, even when the search text is unchanged.
+            let activations = NotificationCenter.default.notifications(
+                named: NSWindow.didBecomeKeyNotification
+            ).map { _ in true }
+            for await _ in activations {
+                guard !Task.isCancelled else { return }
+                retryID += 1
+            }
+        }
         .task(id: Request(input: input, retryID: retryID)) {
+            hoveredTab = nil
             isRefreshing = true
             errorMessage = nil
             do {

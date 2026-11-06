@@ -4,6 +4,7 @@ import SwiftUI
 struct TabList: View {
     let items: [TabItem]
     let isRefreshing: Bool
+    @Binding var hoveredTab: TabItem?
     let onSelect: (TabItem) -> Void
 
     var body: some View {
@@ -11,6 +12,16 @@ struct TabList: View {
             LazyVStack(spacing: 5) {
                 ForEach(items) { item in
                     TabRow(item: item) { onSelect(item) }
+                        .onHover { inside in
+                            if inside && !isRefreshing {
+                                hoveredTab = item
+                            } else if hoveredTab?.id == item.id {
+                                hoveredTab = nil
+                            }
+                        }
+                        .onDisappear {
+                            if hoveredTab?.id == item.id { hoveredTab = nil }
+                        }
                 }
             }
             .padding(10)

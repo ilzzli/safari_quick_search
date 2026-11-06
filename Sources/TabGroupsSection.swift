@@ -2,6 +2,14 @@ import SwiftUI
 
 struct TabGroupsSection: View {
     let provider: any TabGroupsInterface
+    let hoveredTab: TabItem?
+    @State private var matches: [SafariTabMatch] = []
+    @State private var tabStore = TabStore()
+
+    private var hoveredURL: String? {
+        guard let hoveredTab, hoveredTab.type != .SEARCH else { return nil }
+        return hoveredTab.value
+    }
     @State private var profiles: [SafariProfileGroups] = []
     @State private var errorMessage: String?
     @State private var refreshID = 0
@@ -36,13 +44,31 @@ struct TabGroupsSection: View {
                                     Text("No open windows").font(.caption).foregroundStyle(.secondary)
                                 }
                                 ForEach(profile.windows) { window in
-                                    TabGroupsRow(window: window)
+                                    TabGroupsRow(
+                                        window: window,
+                                        highlightedGroups: Set(matches.filter {
+                                            $0.windowID.map(String.init) == window.id.split(separator: ":").last.map(String.init)
+                                        }.map { String($0.groupID) })
+                                    )
                                 }
                             }
                         }
                     }
                 }
                 .frame(maxHeight: 120)
+            }
+        }
+        .task(id: hoveredURL) {
+            matches = []
+            guard let hoveredURL else { return }
+            do {
+                let loaded = try await tabStore.tabs(matchingFullURL: hoveredURL)
+                try Task.checkCancellation()
+                matches = loaded
+            } catch {
+                // Hover remains nonintrusive; database failures are shown by the groups loader.
+                guard !Task.isCancelled else { return }
+                matches = []
             }
         }
         .task(id: refreshID) {

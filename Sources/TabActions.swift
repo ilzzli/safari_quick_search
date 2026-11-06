@@ -18,19 +18,19 @@ final class TabActions: TabActionInterface {
             let matches = try await tabStore.tabs(matchingFullURL: tab.value)
             try Task.checkCancellation()
             let details = matches.isEmpty
-                ? "No open Safari tab matches this full URL."
+                ? "No saved Safari tab matches this page URL (ignoring query strings and fragments). Safari may not have saved the tab to its database yet."
                 : matches.enumerated().map { index, match in
                     """
                     Match \(index + 1)
                     Tab: \(match.tabID) — \(match.title)
                     URL: \(match.url)
                     Group: \(match.groupID) — \(match.groupName)
-                    Window: \(match.windowID)
-                    Window UUID: \(match.windowUUID)
+                    Window: \(match.windowID.map(String.init) ?? "Not linked — saved pinned tab")
+                    Window UUID: \(match.windowUUID ?? "Unknown")
                     Window active profile ID: \(match.activeProfileID.map(String.init) ?? "Unknown")
                     Window active profile name: \(match.activeProfileName.flatMap { $0.isEmpty ? nil : $0 } ?? "Unnamed")
-                    Active group: \(match.isActiveGroup ? "Yes" : "No")
-                    Selected tab in group: \(match.isActiveTab ? "Yes" : "No")
+                    Active group: \(match.windowID == nil ? "Unknown" : (match.isActiveGroup ? "Yes" : "No"))
+                    Selected tab in group: \(match.windowID == nil ? "Unknown" : (match.isActiveTab ? "Yes" : "No"))
                     """
                 }.joined(separator: "\n\n")
             let alert = NSAlert()
