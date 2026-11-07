@@ -56,7 +56,7 @@ actor SafariTabGroups: TabGroupsInterface {
             if titles[profileID] == nil {
                 profileOrder.append(profileID)
                 let title = text(1) ?? ""
-                titles[profileID] = title.isEmpty ? "Default / unnamed profile" : title
+                titles[profileID] = title.isEmpty ? "Default" : title
             }
             guard sqlite3_column_type(statement, 2) != SQLITE_NULL else { continue }
             let windowID = String(sqlite3_column_int64(statement, 2))

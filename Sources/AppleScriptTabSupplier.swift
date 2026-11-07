@@ -30,7 +30,7 @@ actor AppleScriptTabSupplier: TabSupplierInterface {
 
     func select(_ tab: TabItem) async {
         switch tab.type {
-        case .HISTORY, .WINDOW:
+        case .HISTORY, .OPENED_TAB, .PINNED_TAB:
             let details = records.filter { $0.url == tab.value }.map(\.details)
                 .joined(separator: "\n\n")
             await Self.showResponse(details.isEmpty ? tab.value : details)

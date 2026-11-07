@@ -1,6 +1,7 @@
 enum TabType: String, Sendable {
     case HISTORY
-    case WINDOW
+    case OPENED_TAB
+    case PINNED_TAB
     case SEARCH
     case URL
 }
@@ -18,14 +19,16 @@ struct TabItem: Identifiable, Equatable, Sendable {
     /// Full URL for HISTORY/URL; query text for SEARCH.
     let value: String
     var openTabs: [SafariTabMatch] = []
+    var historyRecords: [HistoryEntry] = []
 
     var locationLabel: String? {
         guard !openTabs.isEmpty else { return nil }
         let locations = openTabs.compactMap { tab -> String? in
-            guard let windowID = tab.windowID else { return nil }
+            guard tab.windowID != nil else { return nil }
             let group = ["local", "unnamed", ""].contains(tab.groupName.lowercased())
                 ? "Base" : tab.groupName
-            return "Window \(windowID) · \(group)"
+            let profile = tab.activeProfileName.flatMap { $0.isEmpty ? nil : $0 } ?? "Default"
+            return "\(profile) · \(group)"
         }
         let unique = locations.reduce(into: [String]()) { result, value in
             if !result.contains(value) { result.append(value) }

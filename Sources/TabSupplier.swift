@@ -40,6 +40,41 @@ actor TabSupplier: TabSupplierInterface {
         return items.filter { seen.insert($0.id).inserted }
     }
 
+    /// One full-URL row retains every occurrence; opened tabs take precedence.
+    nonisolated static func mergeResults(_ items: [TabItem], matching input: String) -> [TabItem] {
+        var keys: [String] = []
+        var groups: [String: [TabItem]] = [:]
+        for item in items {
+            let key = TabStore.pageURL(item.value)
+            if groups[key] == nil { keys.append(key) }
+            groups[key, default: []].append(item)
+        }
+        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        var opened: [TabItem] = []
+        var history: [TabItem] = []
+        for key in keys {
+            guard let sources = groups[key],
+                  query.isEmpty || sources.contains(where: {
+                      $0.title.localizedCaseInsensitiveContains(query)
+                          || $0.value.localizedCaseInsensitiveContains(query)
+                  }) else { continue }
+            let tabs = sources.flatMap(\.openTabs).reduce(into: [SafariTabMatch]()) {
+                if !$0.contains($1) { $0.append($1) }
+            }
+            let records = sources.flatMap(\.historyRecords).reduce(into: [HistoryEntry]()) {
+                if !$0.contains($1) { $0.append($1) }
+            }
+            guard let representative = sources.first(where: { !$0.openTabs.isEmpty }) ?? sources.first else { continue }
+            let type: TabType = tabs.isEmpty ? .HISTORY
+                : (tabs.contains(where: \.isPinned) ? .PINNED_TAB : .OPENED_TAB)
+            let item = TabItem(type: type, title: representative.title,
+                               subtitle: representative.subtitle, value: representative.value,
+                               openTabs: tabs, historyRecords: records)
+            if tabs.isEmpty { history.append(item) } else { opened.append(item) }
+        }
+        return opened + history.prefix(10)
+    }
+
     nonisolated static func navigationURL(_ input: String) -> URL? {
         guard !input.contains(where: { $0.isWhitespace }) else { return nil }
         let hasScheme = input.contains("://")
@@ -59,7 +94,7 @@ actor TabSupplier: TabSupplierInterface {
 
     func select(_ tab: TabItem) async {
         switch tab.type {
-        case .HISTORY, .WINDOW:
+        case .HISTORY, .OPENED_TAB, .PINNED_TAB:
             await actions.openHistory(tab)
         case .SEARCH:
             await actions.search(tab)
@@ -76,26 +111,33 @@ actor TabSupplier: TabSupplierInterface {
             try Task.checkCancellation()
             let opened = try await tabStore.allTabs()
             try Task.checkCancellation()
-            let byURL = Dictionary(grouping: opened) { TabStore.pageURL($0.url) }
-            let history = entries.prefix(10).map {
+            // Base has separate database IDs per window but is one UI group.
+            let baseIDs = Dictionary(grouping: opened.filter {
+                ["local", "unnamed", ""].contains($0.groupName.lowercased())
+            }, by: { $0.activeProfileID ?? -1 }).mapValues {
+                $0.map(\.groupID).min() ?? 0
+            }
+            func groupOrder(_ tab: SafariTabMatch) -> Int64 {
+                ["local", "unnamed", ""].contains(tab.groupName.lowercased())
+                    ? (baseIDs[tab.activeProfileID ?? -1] ?? tab.groupID) : tab.groupID
+            }
+            let sorted = opened.sorted {
+                let lhs = ($0.activeProfileID ?? -1, groupOrder($0), $0.tabIndex, $0.tabID)
+                let rhs = ($1.activeProfileID ?? -1, groupOrder($1), $1.tabIndex, $1.tabID)
+                return lhs < rhs
+            }
+            let mappedTabs = sorted.map {
+                TabItem(type: $0.isPinned ? .PINNED_TAB : .OPENED_TAB,
+                        title: $0.title.isEmpty ? $0.url : $0.title,
+                        subtitle: $0.url, value: $0.url, openTabs: [$0])
+            }
+            let mappedHistory = entries.map {
                 TabItem(type: .HISTORY, title: $0.title, subtitle: $0.displayURL,
-                        value: $0.url, openTabs: byURL[TabStore.pageURL($0.url)] ?? [])
+                        value: $0.url, historyRecords: [$0])
             }
-            var seen = Set<String>()
-            var windowTabs: [TabItem] = []
-            let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-            for tab in opened where query.isEmpty
-                || tab.title.localizedCaseInsensitiveContains(query)
-                || tab.url.localizedCaseInsensitiveContains(query) {
-                let key = TabStore.pageURL(tab.url)
-                guard seen.insert(key).inserted else { continue }
-                windowTabs.append(TabItem(
-                    type: .WINDOW, title: tab.title.isEmpty ? tab.url : tab.title,
-                    subtitle: tab.url, value: tab.url, openTabs: byURL[key] ?? []
-                ))
-            }
+            let merged = Self.mergeResults(mappedTabs + mappedHistory, matching: input)
             return Self.orderedTabs(
-                history: windowTabs + history, input: input, additionalOptions: additionalOptions(input)
+                history: merged, input: input, additionalOptions: additionalOptions(input)
             )
         } onCancel: {
             ticket.cancel()

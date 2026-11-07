@@ -17,9 +17,6 @@ struct TabGroupsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Safari profiles")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 Spacer()
                 Button { refreshID += 1 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -55,7 +52,7 @@ struct TabGroupsSection: View {
         .task(id: hoveredTab) {
             matches = []
             guard let hoveredURL else { return }
-            if hoveredTab?.type == .HISTORY || hoveredTab?.type == .WINDOW {
+            if hoveredTab?.type == .HISTORY || hoveredTab?.type == .OPENED_TAB || hoveredTab?.type == .PINNED_TAB {
                 matches = hoveredTab?.openTabs ?? []
                 return
             }

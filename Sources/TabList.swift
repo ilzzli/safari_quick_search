@@ -41,7 +41,8 @@ private struct TabRow: View {
     private var icon: String {
         switch item.type {
         case .HISTORY: "clock"
-        case .WINDOW: item.openTabs.contains(where: \.isPinned) ? "pin" : "macwindow"
+        case .OPENED_TAB: "macwindow"
+        case .PINNED_TAB: "pin"
         case .SEARCH: "magnifyingglass"
         case .URL: "globe"
         }

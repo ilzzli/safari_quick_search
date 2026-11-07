@@ -14,6 +14,12 @@ struct SafariTabMatch: Equatable, Sendable {
     let isActiveGroup: Bool
     let isActiveTab: Bool
     var isPinned: Bool = false
+    var tabIndex: Int64 = 0
+
+    var resultKey: String {
+        let group = ["local", "unnamed", ""].contains(groupName.lowercased()) ? "base" : String(groupID)
+        return "\(activeProfileID ?? -1):\(group):\(tabID)"
+    }
 }
 
 enum TabStoreError: LocalizedError {
@@ -101,7 +107,7 @@ actor TabStore {
             SELECT DISTINCT t.id, t.title, t.url, g.id AS group_id, g.title AS group_name,
                    w.id AS window_id, w.uuid, w.active_profile_id, p.title AS profile_name,
                    w.active_tab_group_id = g.id AS active_group,
-                   COALESCE(wtg.active_tab_id = t.id, 0) AS active_tab, 0 AS pinned
+                   COALESCE(wtg.active_tab_id = t.id, 0) AS active_tab, 0 AS pinned, t.order_index AS tab_index
             FROM bookmarks t JOIN bookmarks g ON g.id = t.parent
             JOIN windows w ON w.active_tab_group_id = g.id OR w.local_tab_group_id = g.id OR EXISTS (
                 SELECT 1 FROM windows_tab_groups m
@@ -121,7 +127,7 @@ actor TabStore {
                    COALESCE(w.active_tab_group_id = g.id, 0),
                    COALESCE(w.active_tab_group_id = g.id
                        AND selected_pin(w.extra_attributes) = t.pin_index
-                       AND t.order_count = 1, 0), 1
+                       AND t.order_count = 1, 0), 1, t.pin_index
             FROM pins t
             LEFT JOIN windows w ON w.date_closed IS NULL
                 AND EXISTS (
@@ -137,7 +143,7 @@ actor TabStore {
         SELECT * FROM matches
         WHERE active_group = 1 AND window_id IS NOT NULL
           AND (url LIKE 'https://%' OR url LIKE 'http://%')
-        ORDER BY active_group DESC, active_tab DESC, window_id, group_id, id
+        ORDER BY active_profile_id, group_id, tab_index, id, window_id
         """
         var statement: OpaquePointer?
         let prepared = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
@@ -170,7 +176,8 @@ actor TabStore {
                 activeProfileName: text(8),
                 isActiveGroup: sqlite3_column_int(statement, 9) != 0,
                 isActiveTab: sqlite3_column_int(statement, 10) != 0,
-                isPinned: sqlite3_column_int(statement, 11) != 0
+                isPinned: sqlite3_column_int(statement, 11) != 0,
+                tabIndex: sqlite3_column_int64(statement, 12)
             ))
         }
     }
