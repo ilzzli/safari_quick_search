@@ -17,7 +17,7 @@ struct TabGroupsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Safari profiles · open windows")
+                Text("Safari profiles")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -35,32 +35,30 @@ struct TabGroupsSection: View {
                 Text("No Safari profiles or open windows found.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 10) {
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
                         ForEach(profiles) { profile in
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(profile.title).font(.caption.weight(.semibold))
-                                if profile.windows.isEmpty {
-                                    Text("No open windows").font(.caption).foregroundStyle(.secondary)
-                                }
-                                ForEach(profile.windows) { window in
-                                    TabGroupsRow(
-                                        window: window,
-                                        highlightedGroups: Set(matches.filter {
-                                            $0.windowID.map(String.init) == window.id.split(separator: ":").last.map(String.init)
-                                        }.map { String($0.groupID) })
-                                    )
-                                }
-                            }
+                            TabGroupsRow(
+                                profile: profile,
+                                highlightedGroups: Set(matches.filter {
+                                    $0.activeProfileID.map(String.init) == profile.id
+                                        && $0.windowID != nil
+                                }.map { String($0.groupID) })
+                            )
                         }
                     }
+                    .padding(.vertical, 2)
                 }
-                .frame(maxHeight: 120)
+                .scrollIndicators(.hidden)
             }
         }
-        .task(id: hoveredURL) {
+        .task(id: hoveredTab) {
             matches = []
             guard let hoveredURL else { return }
+            if hoveredTab?.type == .HISTORY || hoveredTab?.type == .WINDOW {
+                matches = hoveredTab?.openTabs ?? []
+                return
+            }
             do {
                 let loaded = try await tabStore.tabs(matchingFullURL: hoveredURL)
                 try Task.checkCancellation()

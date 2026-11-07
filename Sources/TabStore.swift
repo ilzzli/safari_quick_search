@@ -1,7 +1,7 @@
 import Foundation
 import SQLite3
 
-struct SafariTabMatch: Sendable {
+struct SafariTabMatch: Equatable, Sendable {
     let tabID: Int64
     let title: String
     let url: String
@@ -13,6 +13,7 @@ struct SafariTabMatch: Sendable {
     let activeProfileName: String?
     let isActiveGroup: Bool
     let isActiveTab: Bool
+    var isPinned: Bool = false
 }
 
 enum TabStoreError: LocalizedError {
@@ -42,9 +43,9 @@ actor TabStore {
         self.path = path
     }
 
-    // Match the same page grouping used by history, while preferring exact URLs.
+    // Tab identity preserves query and fragment: different videos/documents must not match.
     nonisolated static func pageURL(_ url: String) -> String {
-        let base = String(url.prefix { $0 != "?" && $0 != "#" })
+        let base = url
         guard var components = URLComponents(string: base) else { return base }
         components.scheme = components.scheme?.lowercased()
         components.host = components.host?.lowercased()
@@ -53,6 +54,10 @@ actor TabStore {
     }
 
     func tabs(matchingFullURL url: String) throws -> [SafariTabMatch] {
+        try allTabs().filter { Self.pageURL($0.url) == Self.pageURL(url) }
+    }
+
+    func allTabs() throws -> [SafariTabMatch] {
         try Task.checkCancellation()
         var connection: OpaquePointer?
         let status = sqlite3_open_v2(path, &connection, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
@@ -62,43 +67,77 @@ actor TabStore {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 250)
-        let registered = sqlite3_create_function_v2(db, "page_url", 1,
+        let registered = sqlite3_create_function_v2(db, "selected_pin", 1,
             SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, { context, _, arguments in
-                guard let value = arguments?[0], let text = sqlite3_value_text(value) else {
+                guard let value = arguments?[0], let bytes = sqlite3_value_blob(value) else {
                     sqlite3_result_null(context)
                     return
                 }
-                let normalized = TabStore.pageURL(String(cString: text))
-                normalized.withCString {
-                    sqlite3_result_text(context, $0, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+                let data = Data(bytes: bytes, count: Int(sqlite3_value_bytes(value)))
+                guard let attributes = (try? PropertyListSerialization.propertyList(
+                    from: data, options: [], format: nil)) as? [String: Any],
+                    let index = attributes["SelectedPinnedTabIndex"] as? NSNumber,
+                    index.int64Value >= 0, index.int64Value < Int64.max,
+                    (attributes["IsPrivateWindow"] as? Bool) != true else {
+                    sqlite3_result_null(context)
+                    return
                 }
+                sqlite3_result_int64(context, index.int64Value)
             }, nil, nil, nil)
         guard registered == SQLITE_OK else { throw TabStoreError.query(registered) }
+        // Rank all pins before URL filtering. Equal order values are ambiguous only
+        // at those positions; later unique positions still have a definite rank.
         let sql = """
-        SELECT DISTINCT t.id, t.title, t.url, g.id, g.title,
-               w.id, w.uuid, w.active_profile_id, p.title,
-               CASE WHEN w.active_tab_group_id = g.id THEN 1 ELSE 0 END,
-               CASE WHEN wtg.active_tab_id = t.id THEN 1 ELSE 0 END
-        FROM bookmarks t
-        JOIN bookmarks g ON g.id = t.parent
-        LEFT JOIN windows w ON w.local_tab_group_id = g.id
-            OR EXISTS (
-                SELECT 1 FROM windows_tab_groups membership
-                WHERE membership.window_id = w.id AND membership.tab_group_id = g.id
+        WITH pins AS (
+            SELECT t.*, g.id AS pin_group, g.title AS pin_group_name,
+                   ROW_NUMBER() OVER (PARTITION BY t.parent ORDER BY t.order_index, t.id) - 1 AS pin_index,
+                   COUNT(*) OVER (PARTITION BY t.parent, t.order_index) AS order_count
+            FROM bookmarks t JOIN bookmarks g ON g.id = t.parent
+            JOIN bookmarks root ON root.id = g.parent
+            WHERE t.deleted = 0 AND g.deleted = 0 AND t.type = 0
+              AND g.external_uuid = 'pinned'
+              AND root.parent IS NULL AND root.deleted = 0
+        ), matches AS (
+            SELECT DISTINCT t.id, t.title, t.url, g.id AS group_id, g.title AS group_name,
+                   w.id AS window_id, w.uuid, w.active_profile_id, p.title AS profile_name,
+                   w.active_tab_group_id = g.id AS active_group,
+                   COALESCE(wtg.active_tab_id = t.id, 0) AS active_tab, 0 AS pinned
+            FROM bookmarks t JOIN bookmarks g ON g.id = t.parent
+            JOIN windows w ON w.active_tab_group_id = g.id OR w.local_tab_group_id = g.id OR EXISTS (
+                SELECT 1 FROM windows_tab_groups m
+                WHERE m.window_id = w.id AND m.tab_group_id = g.id
+            ) OR EXISTS (
+                SELECT 1 FROM windows_unnamed_tab_groups m
+                WHERE m.window_id = w.id AND m.tab_group_id = g.id
             )
-        LEFT JOIN windows_tab_groups wtg ON wtg.window_id = w.id AND wtg.tab_group_id = g.id
-        LEFT JOIN bookmarks p ON p.id = w.active_profile_id
-        WHERE page_url(t.url) = page_url(?1) COLLATE BINARY
-          AND t.deleted = 0 AND g.deleted = 0
-          AND w.date_closed IS NULL
-          AND (w.id IS NOT NULL OR (
-              g.title = 'pinned' COLLATE NOCASE
-              AND EXISTS (
-                  SELECT 1 FROM bookmarks root
-                  WHERE root.id = g.parent AND root.parent IS NULL AND root.deleted = 0
-              )
-          ))
-        ORDER BY (t.url = ?1 COLLATE BINARY) DESC, 10 DESC, 11 DESC, w.id, g.id, t.id
+            LEFT JOIN windows_tab_groups wtg ON wtg.window_id = w.id AND wtg.tab_group_id = g.id
+            LEFT JOIN bookmarks p ON p.id = w.active_profile_id
+            WHERE t.deleted = 0 AND g.deleted = 0 AND t.type = 0
+              AND w.date_closed IS NULL
+            UNION ALL
+            SELECT t.id, t.title, t.url, COALESCE(g.id, t.pin_group),
+                   COALESCE(g.title, t.pin_group_name), w.id, w.uuid,
+                   w.active_profile_id, p.title,
+                   COALESCE(w.active_tab_group_id = g.id, 0),
+                   COALESCE(w.active_tab_group_id = g.id
+                       AND selected_pin(w.extra_attributes) = t.pin_index
+                       AND t.order_count = 1, 0), 1
+            FROM pins t
+            LEFT JOIN windows w ON w.date_closed IS NULL
+                AND EXISTS (
+                    SELECT 1 FROM bookmarks base
+                    WHERE base.id = w.local_tab_group_id AND base.deleted = 0
+                )
+                AND w.active_profile_id IN (
+                    SELECT id FROM bookmarks WHERE external_uuid = 'DefaultProfile' AND deleted = 0
+                )
+            LEFT JOIN bookmarks g ON g.id = w.local_tab_group_id AND g.deleted = 0
+            LEFT JOIN bookmarks p ON p.id = w.active_profile_id
+        )
+        SELECT * FROM matches
+        WHERE active_group = 1 AND window_id IS NOT NULL
+          AND (url LIKE 'https://%' OR url LIKE 'http://%')
+        ORDER BY active_group DESC, active_tab DESC, window_id, group_id, id
         """
         var statement: OpaquePointer?
         let prepared = sqlite3_prepare_v2(db, sql, -1, &statement, nil)
@@ -106,10 +145,6 @@ actor TabStore {
             throw TabStoreError.query(prepared)
         }
         defer { sqlite3_finalize(statement) }
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        let bound = url.withCString { sqlite3_bind_text(statement, 1, $0, -1, transient) }
-        guard bound == SQLITE_OK else { throw TabStoreError.query(bound) }
-
         func text(_ column: Int32) -> String? {
             guard let value = sqlite3_column_text(statement, column) else { return nil }
             return String(cString: value)
@@ -124,7 +159,7 @@ actor TabStore {
             matches.append(SafariTabMatch(
                 tabID: sqlite3_column_int64(statement, 0),
                 title: text(1) ?? "",
-                url: text(2) ?? url,
+                url: text(2) ?? "",
                 groupID: sqlite3_column_int64(statement, 3),
                 groupName: text(4) ?? "",
                 windowID: sqlite3_column_type(statement, 5) == SQLITE_NULL
@@ -134,7 +169,8 @@ actor TabStore {
                     ? nil : sqlite3_column_int64(statement, 7),
                 activeProfileName: text(8),
                 isActiveGroup: sqlite3_column_int(statement, 9) != 0,
-                isActiveTab: sqlite3_column_int(statement, 10) != 0
+                isActiveTab: sqlite3_column_int(statement, 10) != 0,
+                isPinned: sqlite3_column_int(statement, 11) != 0
             ))
         }
     }

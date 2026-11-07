@@ -3,6 +3,7 @@ import Foundation
 /// Reads Safari history off the main actor and combines it with extra options.
 actor TabSupplier: TabSupplierInterface {
     private let store: HistoryStore
+    private let tabStore = TabStore()
     private let actions: any TabActionInterface
     private let additionalOptions: @Sendable (String) -> [TabItem]
 
@@ -16,12 +17,12 @@ actor TabSupplier: TabSupplierInterface {
         self.additionalOptions = additionalOptions
     }
 
-    /// Keep the best history match first, followed by direct actions.
+    /// Keep result sections together; direct URL and search actions follow them.
     nonisolated static func orderedTabs(
         history: [TabItem], input: String, additionalOptions: [TabItem] = []
     ) -> [TabItem] {
         let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        var items = Array(history.prefix(1))
+        var items = history
         if !query.isEmpty {
             if let url = navigationURL(query) {
                 items.append(TabItem(
@@ -34,7 +35,6 @@ actor TabSupplier: TabSupplierInterface {
                 subtitle: "Search Google", value: query
             ))
         }
-        items.append(contentsOf: history.dropFirst())
         items.append(contentsOf: additionalOptions)
         var seen = Set<TabItem.ID>()
         return items.filter { seen.insert($0.id).inserted }
@@ -59,7 +59,7 @@ actor TabSupplier: TabSupplierInterface {
 
     func select(_ tab: TabItem) async {
         switch tab.type {
-        case .HISTORY:
+        case .HISTORY, .WINDOW:
             await actions.openHistory(tab)
         case .SEARCH:
             await actions.search(tab)
@@ -74,11 +74,28 @@ actor TabSupplier: TabSupplierInterface {
             try Task.checkCancellation()
             let entries = try store.search(input, ticket: ticket)
             try Task.checkCancellation()
-            let history = entries.map {
-                TabItem(type: .HISTORY, title: $0.title, subtitle: $0.displayURL, value: $0.url)
+            let opened = try await tabStore.allTabs()
+            try Task.checkCancellation()
+            let byURL = Dictionary(grouping: opened) { TabStore.pageURL($0.url) }
+            let history = entries.prefix(10).map {
+                TabItem(type: .HISTORY, title: $0.title, subtitle: $0.displayURL,
+                        value: $0.url, openTabs: byURL[TabStore.pageURL($0.url)] ?? [])
+            }
+            var seen = Set<String>()
+            var windowTabs: [TabItem] = []
+            let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
+            for tab in opened where query.isEmpty
+                || tab.title.localizedCaseInsensitiveContains(query)
+                || tab.url.localizedCaseInsensitiveContains(query) {
+                let key = TabStore.pageURL(tab.url)
+                guard seen.insert(key).inserted else { continue }
+                windowTabs.append(TabItem(
+                    type: .WINDOW, title: tab.title.isEmpty ? tab.url : tab.title,
+                    subtitle: tab.url, value: tab.url, openTabs: byURL[key] ?? []
+                ))
             }
             return Self.orderedTabs(
-                history: history, input: input, additionalOptions: additionalOptions(input)
+                history: windowTabs + history, input: input, additionalOptions: additionalOptions(input)
             )
         } onCancel: {
             ticket.cancel()

@@ -1,43 +1,48 @@
 import SwiftUI
 
+/// One profile card combines groups from all of its windows.
 struct TabGroupsRow: View {
-    let window: SafariWindowTabGroups
+    let profile: SafariProfileGroups
     var highlightedGroups: Set<String> = []
 
     var body: some View {
-        HStack(spacing: 12) {
-            Label(window.windowTitle, systemImage: "safari")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .padding(4)
-                .background(highlightedGroups.isEmpty ? Color.clear : Color.yellow.opacity(0.35), in: RoundedRectangle(cornerRadius: 5))
-
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(window.groups) { group in
-                        let isActive = group.id == window.activeGroupID
-                        let isHighlighted = highlightedGroups.contains(group.id)
-                        Text(group.displayTitle)
-                            .font(.caption)
-                            .fontWeight(isActive ? .semibold : .regular)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                isHighlighted ? Color.yellow.opacity(0.35) : (isActive ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.08)),
-                                in: Capsule()
-                            )
-                            .overlay {
-                                Capsule()
-                                    .strokeBorder(isHighlighted ? Color.yellow : (isActive ? Color.accentColor : .clear), lineWidth: 1)
-                            }
-                            .accessibilityAddTraits(isActive ? .isSelected : [])
-                    }
+        VStack(alignment: .leading, spacing: 8) {
+            Text(profile.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(highlightedGroups.isEmpty ? Color.secondary : Color.primary)
+            HStack(spacing: 8) {
+                if profile.groups.isEmpty {
+                    Text("No tab groups").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(profile.groups) { group in
+                    let isHighlighted = !group.sourceIDs.isDisjoint(with: highlightedGroups)
+                    Text(group.title)
+                        .font(.caption)
+                        .fontWeight(group.isActive ? .semibold : .regular)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(
+                            isHighlighted ? Color.yellow.opacity(0.35)
+                                : (group.isActive ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.08)),
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(isHighlighted ? Color.yellow
+                                    : (group.isActive ? Color.accentColor : .clear), lineWidth: 1)
+                        }
+                        .accessibilityAddTraits(group.isActive ? .isSelected : [])
                 }
             }
-            .scrollIndicators(.hidden)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(highlightedGroups.isEmpty ? Color.secondary.opacity(0.25) : Color.yellow,
+                              lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Safari window tab groups")
+        .accessibilityLabel(profile.title + " tab groups")
     }
 }

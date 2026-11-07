@@ -17,24 +17,18 @@ actor SafariTabGroups: TabGroupsInterface {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 250)
-        // Include known profile records even when they have no open windows.
-        // Groups below belong to windows associated with the active profile,
-        // not necessarily to the profile's complete saved collection.
+        // Only profiles with open windows are shown. Base and active groups can
+        // be linked directly from windows before membership rows are available.
         let sql = """
-        WITH profiles AS (
-            SELECT id FROM bookmarks WHERE type = 1 AND subtype = 2 AND deleted = 0
-            UNION
-            SELECT COALESCE(active_profile_id, -1) FROM windows WHERE date_closed IS NULL
+        WITH open_windows AS (
+            SELECT * FROM windows WHERE date_closed IS NULL
         )
-        SELECT profiles.id, p.title, w.id, w.uuid, w.active_tab_group_id,
-               g.id, g.title
-        FROM profiles
-        LEFT JOIN bookmarks p ON p.id = profiles.id AND p.deleted = 0
-        LEFT JOIN windows w ON COALESCE(w.active_profile_id, -1) = profiles.id
-                           AND w.date_closed IS NULL
-        LEFT JOIN windows_tab_groups wg ON wg.window_id = w.id
-        LEFT JOIN bookmarks g ON g.id = wg.tab_group_id AND g.deleted = 0
-        ORDER BY profiles.id, w.id, g.order_index, g.id
+        SELECT COALESCE(w.active_profile_id, -1), p.title,
+               w.id, w.uuid, w.active_tab_group_id, g.id, g.title
+        FROM open_windows w
+        LEFT JOIN bookmarks p ON p.id = w.active_profile_id AND p.deleted = 0
+        LEFT JOIN bookmarks g ON g.id = w.active_tab_group_id AND g.deleted = 0
+        ORDER BY COALESCE(w.active_profile_id, -1), w.id, g.order_index, g.id
         """
         var statement: OpaquePointer?
         let prepared = sqlite3_prepare_v2(db, sql, -1, &statement, nil)

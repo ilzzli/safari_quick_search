@@ -18,7 +18,7 @@ final class TabActions: TabActionInterface {
             let matches = try await tabStore.tabs(matchingFullURL: tab.value)
             try Task.checkCancellation()
             let details = matches.isEmpty
-                ? "No saved Safari tab matches this page URL (ignoring query strings and fragments). Safari may not have saved the tab to its database yet."
+                ? "No saved Safari tab matches this full URL. Safari may not have saved the tab to its database yet."
                 : matches.enumerated().map { index, match in
                     """
                     Match \(index + 1)
