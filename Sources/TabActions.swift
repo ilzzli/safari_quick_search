@@ -3,34 +3,31 @@ import AppKit
 /// Placeholder actions until Safari navigation is connected.
 @MainActor
 final class TabActions: TabActionInterface {
-    private let tabStore: TabStore
     private var isLookingUpHistory = false
-
-    init(tabStore: TabStore = TabStore()) {
-        self.tabStore = tabStore
-    }
 
     func openHistory(_ tab: TabItem) async {
         guard !isLookingUpHistory else { return }
         isLookingUpHistory = true
         defer { isLookingUpHistory = false }
         do {
-            let matches = try await tabStore.tabs(matchingFullURL: tab.value)
+            let matches = tab.openTabs
             try Task.checkCancellation()
             let details = matches.isEmpty
-                ? "No saved Safari tab matches this full URL. Safari may not have saved the tab to its database yet."
+                ? "No live Safari tab matched this URL in the latest refresh."
                 : matches.enumerated().map { index, match in
                     """
                     Match \(index + 1)
                     Tab: \(match.tabID) — \(match.title)
                     URL: \(match.url)
                     Group: \(match.groupID) — \(match.groupName)
-                    Window: \(match.windowID.map(String.init) ?? "Not linked — saved pinned tab")
+                    Database window: \(match.windowID.map(String.init) ?? "Not linked")
+                    Safari window ID: \(match.safariWindowID ?? "Unknown")
+                    Live tab index: \(match.tabIndex)
                     Window UUID: \(match.windowUUID ?? "Unknown")
                     Window active profile ID: \(match.activeProfileID.map(String.init) ?? "Unknown")
                     Window active profile name: \(match.activeProfileName.flatMap { $0.isEmpty ? nil : $0 } ?? "Unnamed")
                     Active group: \(match.windowID == nil ? "Unknown" : (match.isActiveGroup ? "Yes" : "No"))
-                    Selected tab in group: \(match.windowID == nil ? "Unknown" : (match.isActiveTab ? "Yes" : "No"))
+                    Selected tab (live): \(match.isActiveTab ? "Yes" : "No")
                     """
                 }.joined(separator: "\n\n")
             let alert = NSAlert()

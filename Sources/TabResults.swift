@@ -9,13 +9,13 @@ struct TabResults: View {
 
     private struct Request: Equatable {
         let input: String
-        let retryID: Int
+        let snapshotID: UUID
     }
 
     @State private var items: [TabItem] = []
     @State private var isRefreshing = true
     @State private var errorMessage: String?
-    @State private var retryID = 0
+    @State private var snapshotID = UUID()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -25,7 +25,7 @@ struct TabResults: View {
                         .multilineTextAlignment(.center)
                         .font(.callout)
                         .foregroundStyle(.secondary)
-                    Button("Retry") { retryID += 1 }
+                    Button("Retry") { snapshotID = UUID() }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if items.isEmpty {
@@ -40,22 +40,25 @@ struct TabResults: View {
             }
         }
         .task {
-            // Ordering an existing NSPanel front does not recreate its SwiftUI view.
-            // Reload when it becomes key, even when the search text is unchanged.
+            // Refresh only on a hidden-to-visible transition, not when an alert
+            // closes or the panel regains keyboard focus.
             let activations = NotificationCenter.default.notifications(
-                named: NSWindow.didBecomeKeyNotification
+                named: AppActions.panelDidOpenNotification
             ).map { _ in true }
             for await _ in activations {
                 guard !Task.isCancelled else { return }
-                retryID += 1
+                snapshotID = UUID()
             }
         }
-        .task(id: Request(input: input, retryID: retryID)) {
+        .task(id: Request(input: input, snapshotID: snapshotID)) {
             hoveredTab = nil
             isRefreshing = true
             errorMessage = nil
             do {
-                let loaded = try await supplier.tabs(matching: input)
+                let cached = try await supplier.cachedTabs(matching: input, snapshotID: snapshotID)
+                try Task.checkCancellation()
+                items = cached
+                let loaded = try await supplier.tabs(matching: input, snapshotID: snapshotID)
                 try Task.checkCancellation()
                 items = loaded
             } catch {

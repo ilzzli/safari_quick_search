@@ -30,7 +30,7 @@ actor AppleScriptTabSupplier: TabSupplierInterface {
 
     func select(_ tab: TabItem) async {
         switch tab.type {
-        case .HISTORY, .OPENED_TAB, .PINNED_TAB:
+        case .HISTORY, .OPENED_TAB:
             let details = records.filter { $0.url == tab.value }.map(\.details)
                 .joined(separator: "\n\n")
             await Self.showResponse(details.isEmpty ? tab.value : details)
@@ -72,28 +72,35 @@ actor AppleScriptTabSupplier: TabSupplierInterface {
     if application "Safari" is not running then return {}
     set tabRows to {}
     with timeout of 10 seconds
-        tell application "/Applications/Safari.app"
+        tell application "Safari.app"
             repeat with browserWindow in windows
                 set windowID to (id of browserWindow) as text
                 set windowIndex to index of browserWindow
                 set windowTitle to name of browserWindow
                 set selectedIndex to index of current tab of browserWindow
-                repeat with browserTab in tabs of browserWindow
-                    set tabURL to URL of browserTab
+                set tabNames to name of every tab of browserWindow
+                set tabURLs to URL of every tab of browserWindow
+                set tabIndexes to index of every tab of browserWindow
+                set tabCount to count of tabNames
+                if (count of tabURLs) is not tabCount or (count of tabIndexes) is not tabCount then
+                    error "Tabs changed while collecting their properties. Please retry."
+                end if
+                repeat with i from 1 to tabCount
+                    set tabURL to item i of tabURLs
+                    set tabTitle to item i of tabNames
+                    set tabIndex to item i of tabIndexes
+                    if tabTitle is missing value then set tabTitle to ""
                     if tabURL is not missing value and tabURL is not "" then
-                        set tabTitle to name of browserTab
-                        if tabTitle is missing value then set tabTitle to ""
-                        set tabIndex to index of browserTab
                         set end of tabRows to {tabURL, tabTitle, windowID, windowIndex, windowTitle, tabIndex, (tabIndex = selectedIndex)}
                     end if
-                end repeat
+            end repeat
             end repeat
         end tell
     end timeout
     return tabRows
     """
 
-    private func readTabs() throws -> [Record] {
+    func readTabs() throws -> [Record] {
         try Task.checkCancellation()
         guard let script = NSAppleScript(source: Self.source) else {
             throw SafariScriptError.failed("Could not create the tab-reading script.")

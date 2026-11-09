@@ -42,7 +42,6 @@ private struct TabRow: View {
         switch item.type {
         case .HISTORY: "clock"
         case .OPENED_TAB: "macwindow"
-        case .PINNED_TAB: "pin"
         case .SEARCH: "magnifyingglass"
         case .URL: "globe"
         }

@@ -13,8 +13,8 @@ struct SafariTabMatch: Equatable, Sendable {
     let activeProfileName: String?
     let isActiveGroup: Bool
     let isActiveTab: Bool
-    var isPinned: Bool = false
     var tabIndex: Int64 = 0
+    var safariWindowID: String? = nil
 
     var resultKey: String {
         let group = ["local", "unnamed", ""].contains(groupName.lowercased()) ? "base" : String(groupID)
@@ -73,26 +73,7 @@ actor TabStore {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 250)
-        let registered = sqlite3_create_function_v2(db, "selected_pin", 1,
-            SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, { context, _, arguments in
-                guard let value = arguments?[0], let bytes = sqlite3_value_blob(value) else {
-                    sqlite3_result_null(context)
-                    return
-                }
-                let data = Data(bytes: bytes, count: Int(sqlite3_value_bytes(value)))
-                guard let attributes = (try? PropertyListSerialization.propertyList(
-                    from: data, options: [], format: nil)) as? [String: Any],
-                    let index = attributes["SelectedPinnedTabIndex"] as? NSNumber,
-                    index.int64Value >= 0, index.int64Value < Int64.max,
-                    (attributes["IsPrivateWindow"] as? Bool) != true else {
-                    sqlite3_result_null(context)
-                    return
-                }
-                sqlite3_result_int64(context, index.int64Value)
-            }, nil, nil, nil)
-        guard registered == SQLITE_OK else { throw TabStoreError.query(registered) }
-        // Rank all pins before URL filtering. Equal order values are ambiguous only
-        // at those positions; later unique positions still have a definite rank.
+        // Saved tabs are metadata candidates only; live selection comes from AppleScript.
         let sql = """
         WITH pins AS (
             SELECT t.*, g.id AS pin_group, g.title AS pin_group_name,
@@ -107,7 +88,7 @@ actor TabStore {
             SELECT DISTINCT t.id, t.title, t.url, g.id AS group_id, g.title AS group_name,
                    w.id AS window_id, w.uuid, w.active_profile_id, p.title AS profile_name,
                    w.active_tab_group_id = g.id AS active_group,
-                   COALESCE(wtg.active_tab_id = t.id, 0) AS active_tab, 0 AS pinned, t.order_index AS tab_index
+                   0 AS active_tab, 0 AS pinned, t.order_index AS tab_index
             FROM bookmarks t JOIN bookmarks g ON g.id = t.parent
             JOIN windows w ON w.active_tab_group_id = g.id OR w.local_tab_group_id = g.id OR EXISTS (
                 SELECT 1 FROM windows_tab_groups m
@@ -125,9 +106,7 @@ actor TabStore {
                    COALESCE(g.title, t.pin_group_name), w.id, w.uuid,
                    w.active_profile_id, p.title,
                    COALESCE(w.active_tab_group_id = g.id, 0),
-                   COALESCE(w.active_tab_group_id = g.id
-                       AND selected_pin(w.extra_attributes) = t.pin_index
-                       AND t.order_count = 1, 0), 1, t.pin_index
+                   0, 1, t.pin_index
             FROM pins t
             LEFT JOIN windows w ON w.date_closed IS NULL
                 AND EXISTS (
@@ -176,7 +155,6 @@ actor TabStore {
                 activeProfileName: text(8),
                 isActiveGroup: sqlite3_column_int(statement, 9) != 0,
                 isActiveTab: sqlite3_column_int(statement, 10) != 0,
-                isPinned: sqlite3_column_int(statement, 11) != 0,
                 tabIndex: sqlite3_column_int64(statement, 12)
             ))
         }

@@ -3,12 +3,8 @@ import SwiftUI
 struct TabGroupsSection: View {
     let provider: any TabGroupsInterface
     let hoveredTab: TabItem?
-    @State private var matches: [SafariTabMatch] = []
-    @State private var tabStore = TabStore()
-
-    private var hoveredURL: String? {
-        guard let hoveredTab, hoveredTab.type != .SEARCH else { return nil }
-        return hoveredTab.value
+    private var matches: [SafariTabMatch] {
+        hoveredTab?.openTabs ?? []
     }
     @State private var profiles: [SafariProfileGroups] = []
     @State private var errorMessage: String?
@@ -47,23 +43,6 @@ struct TabGroupsSection: View {
                     .padding(.vertical, 2)
                 }
                 .scrollIndicators(.hidden)
-            }
-        }
-        .task(id: hoveredTab) {
-            matches = []
-            guard let hoveredURL else { return }
-            if hoveredTab?.type == .HISTORY || hoveredTab?.type == .OPENED_TAB || hoveredTab?.type == .PINNED_TAB {
-                matches = hoveredTab?.openTabs ?? []
-                return
-            }
-            do {
-                let loaded = try await tabStore.tabs(matchingFullURL: hoveredURL)
-                try Task.checkCancellation()
-                matches = loaded
-            } catch {
-                // Hover remains nonintrusive; database failures are shown by the groups loader.
-                guard !Task.isCancelled else { return }
-                matches = []
             }
         }
         .task(id: refreshID) {

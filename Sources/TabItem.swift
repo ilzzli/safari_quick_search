@@ -1,7 +1,6 @@
 enum TabType: String, Sendable {
     case HISTORY
     case OPENED_TAB
-    case PINNED_TAB
     case SEARCH
     case URL
 }
@@ -33,8 +32,7 @@ struct TabItem: Identifiable, Equatable, Sendable {
         let unique = locations.reduce(into: [String]()) { result, value in
             if !result.contains(value) { result.append(value) }
         }
-        let prefix = openTabs.contains(where: \.isPinned) ? "Pinned" : "Open"
-        return prefix + " · " + (unique.isEmpty ? "Window unknown" : unique.joined(separator: " / "))
+        return "Open · " + (unique.isEmpty ? "Window unknown" : unique.joined(separator: " / "))
     }
 
     var id: ID {

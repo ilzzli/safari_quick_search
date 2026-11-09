@@ -3,6 +3,7 @@ import ServiceManagement
 
 @MainActor
 final class AppActions: AppActionsInterface {
+    static let panelDidOpenNotification = Notification.Name("SafariQuickSearch.panelDidOpen")
     private weak var panel: NSPanel?
     private let outsideClickMonitor = OutsideClickMonitor()
 
@@ -12,7 +13,11 @@ final class AppActions: AppActionsInterface {
 
     func showPanel() {
         guard let panel else { return }
+        let wasVisible = panel.isVisible
         panel.makeKeyAndOrderFront(nil)
+        if !wasVisible {
+            NotificationCenter.default.post(name: Self.panelDidOpenNotification, object: panel)
+        }
         outsideClickMonitor.start(panel: panel) { [weak self] in
             self?.hidePanel()
         }
