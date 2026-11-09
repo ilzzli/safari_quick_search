@@ -40,7 +40,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel.isMovableByWindowBackground = true
         panel.contentView = NSHostingView(rootView: PanelLayout(actions: actions, tabSupplier: tabSupplier, tabGroups: tabGroups))
         self.panel = panel
-        panel.center()
+        if let screen = NSScreen.main {
+            let visible = screen.visibleFrame
+            panel.setFrameOrigin(NSPoint(x: visible.midX - 350, y: visible.midY - 250))
+        } else {
+            panel.center()
+        }
         actions.attachPanel(panel)
         actions.showPanel()
         hotkeys.start()

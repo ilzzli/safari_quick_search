@@ -6,10 +6,11 @@ struct PanelLayout: View {
     let tabGroups: any TabGroupsInterface
     @State private var searchText = ""
     @State private var hoveredTab: TabItem?
+    @State private var snapshotID = UUID()
 
     var body: some View {
         VStack(spacing: 0) {
-            TabGroupsSection(provider: tabGroups, hoveredTab: hoveredTab)
+            TabGroupsSection(provider: tabGroups, hoveredTab: hoveredTab, refreshID: snapshotID)
                 .padding(.horizontal, 24)
                 .padding(.top, 18)
             HStack(spacing: 14) {
@@ -37,13 +38,23 @@ struct PanelLayout: View {
             .padding(.horizontal, 24)
             .padding(.vertical, 22)
             Divider().opacity(0.45)
-            TabResults(supplier: tabSupplier, input: searchText, hoveredTab: $hoveredTab)
+            TabResults(supplier: tabSupplier, tabGroups: tabGroups, input: searchText, hoveredTab: $hoveredTab, snapshotID: $snapshotID)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .zIndex(1)
             Divider().opacity(0.45)
             HStack {
                 Text("SAFARI QUICK SEARCH " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""))
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
                 Spacer()
+                Button {
+                    hoveredTab = nil
+                    snapshotID = UUID()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.glass)
+                .help("Refresh Safari tabs and groups")
+                .accessibilityLabel("Refresh Safari tabs and groups")
                 OptionsMenu(actions: actions)
             }
             .foregroundStyle(.secondary)
@@ -58,8 +69,6 @@ struct PanelLayout: View {
 private struct OptionsMenu: View {
     let actions: any AppActionsInterface
     @State private var launchAtStartupEnabled = false
-    @State private var isHovered = false
-    @Environment(\.colorSchemeContrast) private var contrast
 
     var body: some View {
         Menu {
@@ -77,18 +86,9 @@ private struct OptionsMenu: View {
             Button("Quit", action: actions.quit)
         } label: {
             Image(systemName: "gearshape")
-                .foregroundStyle(.secondary)
         }
-        .menuStyle(.borderlessButton)
-        .opacity(isHovered ? 0.5 : 0.25)
-        .frame(width: 36, height: 24)
-        .background {
-            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(Color.primary.opacity(isHovered ? (contrast == .increased ? 0.18 : 0.08) : 0))
-        }
-        .contentShape(Rectangle())
-        .onHover { isHovered = $0 }
-        .onDisappear { isHovered = false }
+        .menuStyle(.button)
+        .buttonStyle(.glass)
         .help("Options")
         .accessibilityLabel("Options")
     }

@@ -1,16 +1,19 @@
 import SwiftUI
 
 struct PanelGlassSurface: ViewModifier {
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
     private let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
 
+    private var backgroundColor: Color {
+        colorScheme == .dark
+            ? Color(red: 0.17, green: 0.17, blue: 0.18)
+            : Color(red: 0.93, green: 0.93, blue: 0.94)
+    }
+
     func body(content: Content) -> some View {
-        if reduceTransparency {
-            content
-                .background(Color(nsColor: .windowBackgroundColor), in: shape)
-                .overlay(shape.strokeBorder(Color.primary.opacity(0.18), lineWidth: 1))
-        } else {
-            content.glassEffect(.regular, in: shape)
-        }
+        content
+            .background(backgroundColor, in: shape)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(Color.primary.opacity(0.15), lineWidth: 1))
     }
 }

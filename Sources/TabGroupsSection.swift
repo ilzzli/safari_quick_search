@@ -3,24 +3,15 @@ import SwiftUI
 struct TabGroupsSection: View {
     let provider: any TabGroupsInterface
     let hoveredTab: TabItem?
+    let refreshID: UUID
     private var matches: [SafariTabMatch] {
         hoveredTab?.openTabs ?? []
     }
     @State private var profiles: [SafariProfileGroups] = []
     @State private var errorMessage: String?
-    @State private var refreshID = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Spacer()
-                Button { refreshID += 1 } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.plain)
-                .help("Refresh Safari tab groups")
-                .accessibilityLabel("Refresh Safari tab groups")
-            }
             if let errorMessage {
                 Text(errorMessage).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -43,23 +34,17 @@ struct TabGroupsSection: View {
                     .padding(.vertical, 2)
                 }
                 .scrollIndicators(.hidden)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
         .task(id: refreshID) {
-            // Refresh while displayed so Safari tab-group changes are reflected.
-            while !Task.isCancelled {
-                do {
-                    let loaded = try await provider.profiles()
-                    try Task.checkCancellation()
-                    profiles = loaded
-                    errorMessage = nil
-                } catch {
-                    guard !Task.isCancelled else { return }
-                    errorMessage = error.localizedDescription
-                    return
-                }
-                do { try await Task.sleep(for: .seconds(2)) }
-                catch { return }
+            do {
+                let loaded = try await provider.profiles()
+                try Task.checkCancellation()
+                profiles = loaded
+            } catch {
+                guard !Task.isCancelled else { return }
+                errorMessage = error.localizedDescription
             }
         }
     }

@@ -7,8 +7,10 @@ struct TabGroupsRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(profile.title)
-                .font(.caption.weight(.semibold))
+            Label(profile.title, systemImage: "person.crop.circle")
+                .font(.callout.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize()
                 .foregroundStyle(highlightedGroups.isEmpty ? Color.secondary : Color.primary)
             HStack(spacing: 8) {
                 if profile.groups.isEmpty {
@@ -16,30 +18,33 @@ struct TabGroupsRow: View {
                 }
                 ForEach(profile.groups) { group in
                     let isHighlighted = !group.sourceIDs.isDisjoint(with: highlightedGroups)
-                    Text(group.title)
+                    Label(group.title, systemImage: isHighlighted ? "checkmark.circle.fill" : "rectangle.on.rectangle")
+                        .labelStyle(.titleAndIcon)
+                        .lineLimit(1)
+                        .fixedSize()
                         .font(.caption)
-                        .fontWeight(group.isActive ? .semibold : .regular)
+                        .fontWeight(isHighlighted ? .semibold : .regular)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
                         .background(
-                            isHighlighted ? Color.yellow.opacity(0.35)
-                                : (group.isActive ? Color.accentColor.opacity(0.2) : Color.secondary.opacity(0.08)),
-                            in: RoundedRectangle(cornerRadius: 8)
+                            isHighlighted ? Color.yellow.opacity(0.18)
+                                : Color.secondary.opacity(0.07),
+                            in: Capsule()
                         )
                         .overlay {
-                            RoundedRectangle(cornerRadius: 8)
-                                .strokeBorder(isHighlighted ? Color.yellow
-                                    : (group.isActive ? Color.accentColor : .clear), lineWidth: 1)
+                            Capsule()
+                                .strokeBorder(isHighlighted ? Color.yellow.opacity(0.65) : Color.secondary.opacity(0.12), lineWidth: 1)
                         }
                         .accessibilityAddTraits(group.isActive ? .isSelected : [])
                 }
             }
         }
-        .padding(10)
-        .background(Color.secondary.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+        .fixedSize(horizontal: true, vertical: true)
+        .padding(12)
+        .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
         .overlay {
             RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(highlightedGroups.isEmpty ? Color.secondary.opacity(0.25) : Color.yellow,
+                .strokeBorder(highlightedGroups.isEmpty ? Color.secondary.opacity(0.12) : Color.yellow.opacity(0.4),
                               lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
