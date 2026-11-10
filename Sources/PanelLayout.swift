@@ -7,12 +7,19 @@ struct PanelLayout: View {
     @State private var searchText = ""
     @State private var hoveredTab: TabItem?
     @State private var snapshotID = UUID()
+    @State private var profiles: [SafariProfileGroups] = []
+    @State private var profilesError: String?
 
     var body: some View {
         VStack(spacing: 0) {
-            TabGroupsSection(provider: tabGroups, hoveredTab: hoveredTab, refreshID: snapshotID)
-                .padding(.horizontal, 24)
-                .padding(.top, 18)
+            TabGroupsSection(
+                profiles: profiles,
+                errorMessage: profilesError,
+                hoveredTab: hoveredTab
+            )
+            .padding(.horizontal, 24)
+            .padding(.top, 18)
+
             HStack(spacing: 14) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 25, weight: .light))
@@ -37,11 +44,21 @@ struct PanelLayout: View {
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 22)
+
             Divider().opacity(0.45)
-            TabResults(supplier: tabSupplier, tabGroups: tabGroups, input: searchText, hoveredTab: $hoveredTab, snapshotID: $snapshotID)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .zIndex(1)
+
+            TabResults(
+                supplier: tabSupplier,
+                profiles: profiles,
+                input: searchText,
+                hoveredTab: $hoveredTab,
+                snapshotID: $snapshotID
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .zIndex(1)
+
             Divider().opacity(0.45)
+
             HStack {
                 Text("SAFARI QUICK SEARCH " + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""))
                     .font(.system(size: 10, weight: .semibold, design: .rounded))
@@ -63,6 +80,17 @@ struct PanelLayout: View {
         }
         .frame(width: 700, height: 500)
         .modifier(PanelGlassSurface())
+        .task(id: snapshotID) {
+            profilesError = nil
+            do {
+                let loaded = try await tabGroups.profiles()
+                try Task.checkCancellation()
+                profiles = loaded
+            } catch {
+                guard !Task.isCancelled else { return }
+                profilesError = error.localizedDescription
+            }
+        }
     }
 }
 

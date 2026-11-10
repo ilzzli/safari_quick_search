@@ -3,44 +3,7 @@ import Foundation
 
 /// Reads the tabs Safari exposes in its live windows. Safari's scripting dictionary
 /// does not expose profile, tab-group, pinned status, or a persistent tab identifier.
-actor AppleScriptTabSupplier: TabSupplierInterface {
-    private let actions: any TabActionInterface
-    private var records: [Record] = []
-
-    init(actions: any TabActionInterface) {
-        self.actions = actions
-    }
-
-    func tabs(matching input: String) async throws -> [TabItem] {
-        try await Task.sleep(for: .milliseconds(250))
-        let loaded = try readTabs()
-        try Task.checkCancellation()
-        records = loaded
-        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        var seen = Set<String>()
-        let items = loaded.filter {
-            query.isEmpty || $0.title.localizedCaseInsensitiveContains(query)
-                || $0.url.localizedCaseInsensitiveContains(query)
-        }.filter { seen.insert($0.url).inserted }.prefix(20).map {
-            TabItem(type: .HISTORY, title: $0.title.isEmpty ? $0.url : $0.title,
-                    subtitle: $0.url, value: $0.url)
-        }
-        return TabSupplier.orderedTabs(history: items, input: input)
-    }
-
-    func select(_ tab: TabItem) async {
-        switch tab.type {
-        case .HISTORY, .OPENED_TAB:
-            let details = records.filter { $0.url == tab.value }.map(\.details)
-                .joined(separator: "\n\n")
-            await Self.showResponse(details.isEmpty ? tab.value : details)
-        case .SEARCH:
-            await actions.search(tab)
-        case .URL:
-            await actions.openURL(tab)
-        }
-    }
-
+struct AppleScriptTabSupplier: Sendable {
     struct Record: Sendable {
         let url: String
         let title: String
@@ -49,21 +12,6 @@ actor AppleScriptTabSupplier: TabSupplierInterface {
         let windowTitle: String
         let tabIndex: Int
         let selected: Bool
-
-        var details: String {
-            """
-            Title: \(title)
-            URL: \(url)
-            AppleScript window ID: \(windowID)
-            Window index: \(windowIndex)
-            Window title: \(windowTitle)
-            Tab index: \(tabIndex)
-            Selected tab: \(selected ? "Yes" : "No")
-
-            Profile, tab group, and pinned status: not exposed by Safari AppleScript.
-            Window IDs here are not SafariTabs.db window IDs.
-            """
-        }
     }
 
     // Return typed Apple event lists instead of delimited text so titles and URLs
@@ -93,7 +41,7 @@ actor AppleScriptTabSupplier: TabSupplierInterface {
                     if tabURL is not missing value and tabURL is not "" then
                         set end of tabRows to {tabURL, tabTitle, windowID, windowIndex, windowTitle, tabIndex, (tabIndex = selectedIndex)}
                     end if
-            end repeat
+                end repeat
             end repeat
         end tell
     end timeout
@@ -137,29 +85,16 @@ actor AppleScriptTabSupplier: TabSupplierInterface {
                   let selected = row.atIndex(7) else {
                 throw SafariScriptError.failed("Safari returned an incomplete tab record.")
             }
-            return Record(url: url, title: title, windowID: windowID,
-                          windowIndex: Int(windowIndex.int32Value), windowTitle: windowTitle,
-                          tabIndex: Int(tabIndex.int32Value), selected: selected.booleanValue)
+            return Record(
+                url: url,
+                title: title,
+                windowID: windowID,
+                windowIndex: Int(windowIndex.int32Value),
+                windowTitle: windowTitle,
+                tabIndex: Int(tabIndex.int32Value),
+                selected: selected.booleanValue
+            )
         }
-    }
-
-    @MainActor
-    private static func showResponse(_ response: String) {
-        let alert = NSAlert()
-        alert.messageText = "Safari Live Tab Details"
-        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 520, height: 280))
-        scroll.hasVerticalScroller = true
-        let text = NSTextView(frame: scroll.bounds)
-        text.isEditable = false
-        text.isSelectable = true
-        text.isVerticallyResizable = true
-        text.autoresizingMask = [.width]
-        text.textContainer?.widthTracksTextView = true
-        text.string = response
-        scroll.documentView = text
-        alert.accessoryView = scroll
-        alert.window.level = .floating
-        alert.runModal()
     }
 }
 
@@ -168,7 +103,7 @@ private enum SafariScriptError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .failed(let message): return "Could not read Safari tabs. " + message
+        case .failed(let message): "Could not read Safari tabs. " + message
         }
     }
 }

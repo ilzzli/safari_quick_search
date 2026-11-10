@@ -24,14 +24,12 @@ struct TabItem: Identifiable, Equatable, Sendable {
         guard !openTabs.isEmpty else { return nil }
         let locations = openTabs.compactMap { tab -> String? in
             guard tab.windowID != nil else { return nil }
-            let group = ["local", "unnamed", ""].contains(tab.groupName.lowercased())
-                ? "Base" : tab.groupName
-            let profile = tab.activeProfileName.flatMap { $0.isEmpty ? nil : $0 } ?? "Default"
+            let group = SafariTabGroup.normalizedTitle(tab.groupName)
+            let profile = SafariTabGroup.normalizedProfileName(tab.activeProfileName)
             return "\(profile) · \(group)"
         }
-        let unique = locations.reduce(into: [String]()) { result, value in
-            if !result.contains(value) { result.append(value) }
-        }
+        var seen = Set<String>()
+        let unique = locations.filter { seen.insert($0).inserted }
         return "Open · " + (unique.isEmpty ? "Window unknown" : unique.joined(separator: " / "))
     }
 

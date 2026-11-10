@@ -2,19 +2,31 @@ struct SafariTabGroup: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
 
+    static func isBaseTitle(_ title: String) -> Bool {
+        ["local", "unnamed", ""].contains(title.lowercased())
+    }
+
+    static func normalizedTitle(_ title: String) -> String {
+        isBaseTitle(title) ? "Base" : title
+    }
+
+    static func normalizedProfileName(_ name: String?) -> String {
+        name.flatMap { $0.isEmpty ? nil : $0 } ?? "Default"
+    }
+
     var displayTitle: String {
-        ["local", "unnamed", ""].contains(title.lowercased()) ? "Base" : title
+        Self.normalizedTitle(title)
     }
 }
 
-struct SafariWindowTabGroups: Identifiable, Sendable {
+struct SafariWindowTabGroups: Identifiable, Equatable, Sendable {
     let id: String
     let windowTitle: String
     let groups: [SafariTabGroup]
     let activeGroupID: String?
 }
 
-struct SafariProfileGroups: Identifiable, Sendable {
+struct SafariProfileGroups: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     let windows: [SafariWindowTabGroups]
@@ -24,16 +36,19 @@ struct SafariProfileGroups: Identifiable, Sendable {
         var result: [SafariProfileTabGroup] = []
         for window in windows {
             for group in window.groups {
-                let key = ["local", "unnamed", ""].contains(group.title.lowercased())
-                    ? "base" : "group:" + group.id
+                let key = SafariTabGroup.isBaseTitle(group.title) ? "base" : "group:" + group.id
                 if let index = result.firstIndex(where: { $0.id == key }) {
                     result[index].sourceIDs.insert(group.id)
                     result[index].isActive = result[index].isActive || group.id == window.activeGroupID
                 } else {
-                    result.append(SafariProfileTabGroup(
-                        id: key, title: group.displayTitle, sourceIDs: [group.id],
-                        isActive: group.id == window.activeGroupID
-                    ))
+                    result.append(
+                        SafariProfileTabGroup(
+                            id: key,
+                            title: group.displayTitle,
+                            sourceIDs: [group.id],
+                            isActive: group.id == window.activeGroupID
+                        )
+                    )
                 }
             }
         }
@@ -41,7 +56,7 @@ struct SafariProfileGroups: Identifiable, Sendable {
     }
 }
 
-struct SafariProfileTabGroup: Identifiable, Sendable {
+struct SafariProfileTabGroup: Identifiable, Equatable, Sendable {
     let id: String
     let title: String
     var sourceIDs: Set<String>

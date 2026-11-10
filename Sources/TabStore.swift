@@ -15,11 +15,6 @@ struct SafariTabMatch: Equatable, Sendable {
     let isActiveTab: Bool
     var tabIndex: Int64 = 0
     var safariWindowID: String? = nil
-
-    var resultKey: String {
-        let group = ["local", "unnamed", ""].contains(groupName.lowercased()) ? "base" : String(groupID)
-        return "\(activeProfileID ?? -1):\(group):\(tabID)"
-    }
 }
 
 enum TabStoreError: LocalizedError {
@@ -29,9 +24,9 @@ enum TabStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .open(let code):
-            return "Cannot read SafariTabs.db (SQLite \(code)). Grant this app Full Disk Access, then quit and reopen it."
+            "Cannot read SafariTabs.db (SQLite \(code)). Grant this app Full Disk Access, then quit and reopen it."
         case .query(let code):
-            return "Cannot query Safari tabs (SQLite \(code)). Safari may be busy or its database format may have changed."
+            "Cannot query Safari tabs (SQLite \(code)). Safari may be busy or its database format may have changed."
         }
     }
 }
@@ -51,16 +46,11 @@ actor TabStore {
 
     // Tab identity preserves query and fragment: different videos/documents must not match.
     nonisolated static func pageURL(_ url: String) -> String {
-        let base = url
-        guard var components = URLComponents(string: base) else { return base }
+        guard var components = URLComponents(string: url) else { return url }
         components.scheme = components.scheme?.lowercased()
         components.host = components.host?.lowercased()
         if components.path.isEmpty { components.path = "/" }
-        return components.string ?? base
-    }
-
-    func tabs(matchingFullURL url: String) throws -> [SafariTabMatch] {
-        try allTabs().filter { Self.pageURL($0.url) == Self.pageURL(url) }
+        return components.string ?? url
     }
 
     func allTabs() throws -> [SafariTabMatch] {
@@ -141,22 +131,24 @@ actor TabStore {
             let result = sqlite3_step(statement)
             if result == SQLITE_DONE { return matches }
             guard result == SQLITE_ROW else { throw TabStoreError.query(result) }
-            matches.append(SafariTabMatch(
-                tabID: sqlite3_column_int64(statement, 0),
-                title: text(1) ?? "",
-                url: text(2) ?? "",
-                groupID: sqlite3_column_int64(statement, 3),
-                groupName: text(4) ?? "",
-                windowID: sqlite3_column_type(statement, 5) == SQLITE_NULL
-                    ? nil : sqlite3_column_int64(statement, 5),
-                windowUUID: text(6),
-                activeProfileID: sqlite3_column_type(statement, 7) == SQLITE_NULL
-                    ? nil : sqlite3_column_int64(statement, 7),
-                activeProfileName: text(8),
-                isActiveGroup: sqlite3_column_int(statement, 9) != 0,
-                isActiveTab: sqlite3_column_int(statement, 10) != 0,
-                tabIndex: sqlite3_column_int64(statement, 12)
-            ))
+            matches.append(
+                SafariTabMatch(
+                    tabID: sqlite3_column_int64(statement, 0),
+                    title: text(1) ?? "",
+                    url: text(2) ?? "",
+                    groupID: sqlite3_column_int64(statement, 3),
+                    groupName: text(4) ?? "",
+                    windowID: sqlite3_column_type(statement, 5) == SQLITE_NULL
+                        ? nil : sqlite3_column_int64(statement, 5),
+                    windowUUID: text(6),
+                    activeProfileID: sqlite3_column_type(statement, 7) == SQLITE_NULL
+                        ? nil : sqlite3_column_int64(statement, 7),
+                    activeProfileName: text(8),
+                    isActiveGroup: sqlite3_column_int(statement, 9) != 0,
+                    isActiveTab: sqlite3_column_int(statement, 10) != 0,
+                    tabIndex: sqlite3_column_int64(statement, 12)
+                )
+            )
         }
     }
 }

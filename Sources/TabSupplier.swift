@@ -1,110 +1,119 @@
 import Foundation
 
-/// Reads Safari history off the main actor and combines it with extra options.
 actor TabSupplier: TabSupplierInterface {
-    private var cachedHistory: [HistoryEntry] = []
-    private var snapshotID: UUID?
-    private var snapshotTask: Task<[SafariTabMatch], Error>?
-    private let defaultSnapshotID = UUID()
-    private let store: HistoryStore
-    private let liveTabs: LiveTabStore
     private let actions: any TabActionInterface
-    private let additionalOptions: @Sendable (String) -> [TabItem]
+    private let historyStore = HistoryStore(path: HistoryStore.defaultPath)
+    private let tabStore = LiveTabStore()
+    private var activeTicket: SearchTicket?
+    private var openSnapshotID: UUID?
+    private var openSnapshot: [SafariTabMatch]?
 
-    init(
-        actions: any TabActionInterface,
-        path: String = HistoryStore.defaultPath,
-        additionalOptions: @escaping @Sendable (String) -> [TabItem] = { _ in [] }
-    ) {
+    init(actions: any TabActionInterface) {
         self.actions = actions
-        liveTabs = LiveTabStore(actions: actions)
-        store = HistoryStore(path: path)
-        self.additionalOptions = additionalOptions
     }
 
-    /// Keep the top match first, followed by actions, then remaining matches.
+    func cachedTabs(matching input: String, snapshotID: UUID) async throws -> [TabItem] {
+        let openTabs = openSnapshotID == snapshotID ? (openSnapshot ?? []) : []
+        return Self.orderedTabs(history: [], openTabs: openTabs, input: input)
+    }
+
+    func tabs(matching input: String, snapshotID: UUID) async throws -> [TabItem] {
+        activeTicket?.cancel()
+        if !input.isEmpty {
+            try await Task.sleep(for: .milliseconds(250))
+        }
+        let openTabs = try await loadedOpenTabs(snapshotID: snapshotID)
+        let ticket = SearchTicket()
+        activeTicket = ticket
+        defer { if activeTicket === ticket { activeTicket = nil } }
+        let phrase = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let store = historyStore
+        let entries = try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try store.search(phrase, ticket: ticket)
+        } onCancel: {
+            ticket.cancel()
+        }
+        return Self.orderedTabs(history: entries, openTabs: openTabs, input: input)
+    }
+
+    private func loadedOpenTabs(snapshotID: UUID) async throws -> [SafariTabMatch] {
+        if openSnapshotID == snapshotID, let openSnapshot {
+            return openSnapshot
+        }
+        let loaded = try await tabStore.tabs()
+        openSnapshotID = snapshotID
+        openSnapshot = loaded
+        return loaded
+    }
+
     nonisolated static func orderedTabs(
-        history: [TabItem], input: String, additionalOptions: [TabItem] = []
+        history: [HistoryEntry],
+        openTabs: [SafariTabMatch] = [],
+        input: String
     ) -> [TabItem] {
-        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        var items = Array(history.prefix(1))
-        if !query.isEmpty {
-            if let url = navigationURL(query) {
-                items.append(TabItem(
-                    type: .URL, title: "Open: \(query)",
-                    subtitle: url.absoluteString, value: url.absoluteString
-                ))
-            }
-            items.append(TabItem(
-                type: .SEARCH, title: "Search: \(query)",
-                subtitle: "Search Google", value: query
-            ))
+        let phrase = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        let openByURL = Dictionary(grouping: openTabs) { TabStore.pageURL($0.url) }
+        var seenOpenURLs = Set<String>()
+        var openItems: [TabItem] = []
+        for tab in openTabs {
+            guard phrase.isEmpty || tab.title.localizedCaseInsensitiveContains(phrase)
+                || tab.url.localizedCaseInsensitiveContains(phrase) else { continue }
+            let key = TabStore.pageURL(tab.url)
+            guard seenOpenURLs.insert(key).inserted else { continue }
+            let matches = openByURL[key] ?? [tab]
+            let historyMatches = history.filter { TabStore.pageURL($0.url) == key }
+            let title = matches.first(where: { !$0.title.isEmpty })?.title
+                ?? historyMatches.first?.title ?? tab.url
+            openItems.append(
+                TabItem(
+                    type: .OPENED_TAB,
+                    title: title,
+                    subtitle: displayURL(tab.url),
+                    value: tab.url,
+                    openTabs: matches,
+                    historyRecords: historyMatches
+                )
+            )
         }
-        items.append(contentsOf: history.dropFirst())
-        items.append(contentsOf: additionalOptions)
-        var seen = Set<TabItem.ID>()
-        return items.filter { seen.insert($0.id).inserted }
+        let historyItems = history.compactMap { entry -> TabItem? in
+            guard openByURL[TabStore.pageURL(entry.url)] == nil else { return nil }
+            return TabItem(
+                type: .HISTORY,
+                title: entry.title,
+                subtitle: entry.displayURL,
+                value: entry.url,
+                historyRecords: [entry]
+            )
+        }
+        var results = Array((openItems + historyItems).prefix(20))
+        if !phrase.isEmpty {
+            results.insert(
+                TabItem(
+                    type: .SEARCH,
+                    title: "Search: \(phrase)",
+                    subtitle: "Google • opens in Safari",
+                    value: phrase
+                ),
+                at: min(1, results.count)
+            )
+        }
+        if let url = navigationURL(phrase) {
+            results.insert(
+                TabItem(
+                    type: .URL,
+                    title: "Navigate to URL",
+                    subtitle: url.absoluteString,
+                    value: url.absoluteString
+                ),
+                at: 0
+            )
+        }
+        return results
     }
 
-    /// AppleScript-selected tabs first, then numeric Safari window ID and tab index.
-    nonisolated static func currentTabPrecedes(_ lhs: SafariTabMatch, _ rhs: SafariTabMatch) -> Bool {
-        if lhs.isActiveTab != rhs.isActiveTab { return lhs.isActiveTab }
-        let lhsWindowID = lhs.safariWindowID.flatMap { Int64($0) } ?? Int64.max
-        let rhsWindowID = rhs.safariWindowID.flatMap { Int64($0) } ?? Int64.max
-        return (lhsWindowID, lhs.tabIndex, lhs.tabID)
-            < (rhsWindowID, rhs.tabIndex, rhs.tabID)
-    }
-
-    /// One full-URL row retains every occurrence; opened tabs take precedence.
-    nonisolated static func mergeResults(_ items: [TabItem], matching input: String) -> [TabItem] {
-        var keys: [String] = []
-        var groups: [String: [TabItem]] = [:]
-        for item in items {
-            let key = TabStore.pageURL(item.value)
-            if groups[key] == nil { keys.append(key) }
-            groups[key, default: []].append(item)
-        }
-        let query = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        var opened: [TabItem] = []
-        var history: [TabItem] = []
-        for key in keys {
-            guard let sources = groups[key],
-                  query.isEmpty || sources.contains(where: {
-                      $0.title.localizedCaseInsensitiveContains(query)
-                          || $0.value.localizedCaseInsensitiveContains(query)
-                  }) else { continue }
-            let tabs = sources.flatMap(\.openTabs).reduce(into: [SafariTabMatch]()) {
-                if !$0.contains($1) { $0.append($1) }
-            }
-            let records = sources.flatMap(\.historyRecords).reduce(into: [HistoryEntry]()) {
-                if !$0.contains($1) { $0.append($1) }
-            }
-            guard let representative = sources.first(where: { !$0.openTabs.isEmpty }) ?? sources.first else { continue }
-            let type: TabType = tabs.isEmpty ? .HISTORY
-                : .OPENED_TAB
-            let item = TabItem(type: type, title: representative.title,
-                               subtitle: representative.subtitle, value: representative.value,
-                               openTabs: tabs, historyRecords: records)
-            if tabs.isEmpty { history.append(item) } else { opened.append(item) }
-        }
-        return opened + history.prefix(10)
-    }
-
-    nonisolated static func navigationURL(_ input: String) -> URL? {
-        guard !input.contains(where: { $0.isWhitespace }) else { return nil }
-        let hasScheme = input.contains("://")
-        let candidate = hasScheme ? input : "https://" + input
-        guard let components = URLComponents(string: candidate),
-              let scheme = components.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              let host = components.host, !host.isEmpty,
-              components.user == nil, components.password == nil,
-              components.port.map({ (1...65535).contains($0) }) ?? true else { return nil }
-        // Bare words are searches; domain names, localhost, and explicit web URLs are navigable.
-        guard hasScheme || host.contains(".") || host == "localhost" || host.contains(":") else {
-            return nil
-        }
-        return components.url
+    private nonisolated static func displayURL(_ url: String) -> String {
+        String(url.prefix { $0 != "?" && $0 != "#" })
     }
 
     func select(_ tab: TabItem) async {
@@ -118,62 +127,22 @@ actor TabSupplier: TabSupplierInterface {
         }
     }
 
-    func tabs(matching input: String) async throws -> [TabItem] {
-        try await tabs(matching: input, snapshotID: defaultSnapshotID)
-    }
-
-    private func snapshot(for id: UUID) async throws -> [SafariTabMatch] {
-        if snapshotID != id || snapshotTask == nil {
-            snapshotID = id
-            cachedHistory = []
-            snapshotTask = Task { [liveTabs] in try await liveTabs.tabs() }
+    /// Only treat the entire input as an address; ordinary phrases remain searches.
+    nonisolated static func navigationURL(_ input: String) -> URL? {
+        let value = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return nil }
+        let hasWebScheme = value.lowercased().hasPrefix("https://") || value.lowercased().hasPrefix("http://")
+        let candidate = hasWebScheme ? value : "https://" + value
+        guard let components = URLComponents(string: candidate),
+              let host = components.host, !host.isEmpty,
+              components.user == nil, components.password == nil,
+              let url = components.url else { return nil }
+        if let port = components.port, !(1...65535).contains(port) { return nil }
+        if !hasWebScheme {
+            let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+            guard host == "localhost" || (labels.count >= 2 && labels.allSatisfy { !$0.isEmpty }) else { return nil }
+            guard !value.contains("://"), !value.contains("@") else { return nil }
         }
-        guard let task = snapshotTask else { return [] }
-        let opened = try await task.value
-        try Task.checkCancellation()
-        return opened
-    }
-
-    func cachedTabs(matching input: String, snapshotID: UUID) async throws -> [TabItem] {
-        let opened = try await snapshot(for: snapshotID)
-        return results(opened: opened, entries: cachedHistory, input: input)
-    }
-
-    func tabs(matching input: String, snapshotID: UUID) async throws -> [TabItem] {
-        let opened = try await snapshot(for: snapshotID)
-        // Only the database query is debounced; cached results are already visible.
-        try await Task.sleep(for: .milliseconds(200))
-        let ticket = SearchTicket()
-        return try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            let entries = try store.search(input, ticket: ticket)
-            try Task.checkCancellation()
-            cachedHistory = entries
-            return results(opened: opened, entries: entries, input: input)
-        } onCancel: {
-            ticket.cancel()
-        }
-    }
-
-    private func results(opened: [SafariTabMatch], entries: [HistoryEntry], input: String) -> [TabItem] {
-        let sorted = opened.sorted(by: Self.currentTabPrecedes)
-        let mappedTabs = sorted.map {
-            TabItem(type: .OPENED_TAB,
-                    title: $0.title.isEmpty ? $0.url : $0.title,
-                    subtitle: $0.url, value: $0.url, openTabs: [$0])
-        }
-        let mappedHistory = entries.map {
-            TabItem(type: .HISTORY, title: $0.title, subtitle: $0.displayURL,
-                    value: $0.url, historyRecords: [$0])
-        }
-        let merged = Self.mergeResults(mappedTabs + mappedHistory, matching: input)
-        return Self.orderedTabs(
-            history: merged, input: input, additionalOptions: additionalOptions(input)
-        ).map { item in
-            guard item.type == .URL else { return item }
-            var item = item
-            item.openTabs = opened.filter { TabStore.pageURL($0.url) == TabStore.pageURL(item.value) }
-            return item
-        }
+        return url
     }
 }

@@ -14,15 +14,11 @@ struct SafariWindowMetadata: Sendable {
 /// Live script results determine existence, URL, title, index, and selection.
 /// SQLite contributes only saved window/group/profile and bookmark metadata.
 actor LiveTabStore {
-    private let reader: AppleScriptTabSupplier
+    private let reader = AppleScriptTabSupplier()
     private let database = TabStore()
 
-    init(actions: any TabActionInterface) {
-        reader = AppleScriptTabSupplier(actions: actions)
-    }
-
     func tabs() async throws -> [SafariTabMatch] {
-        let live = try await reader.readTabs()
+        let live = try reader.readTabs()
         try Task.checkCancellation()
         let windows = try Self.windows()
         let saved = try await database.allTabs()
@@ -32,7 +28,8 @@ actor LiveTabStore {
 
     static func combine(
         live: [AppleScriptTabSupplier.Record],
-        windows: [SafariWindowMetadata], saved: [SafariTabMatch]
+        windows: [SafariWindowMetadata],
+        saved: [SafariTabMatch]
     ) -> [SafariTabMatch] {
         let liveWindows = Dictionary(grouping: live, by: \.windowID)
         var associations: [String: SafariWindowMetadata] = [:]
@@ -63,11 +60,16 @@ actor LiveTabStore {
             let metadata = stored.count == 1 ? stored.first : nil
             return SafariTabMatch(
                 tabID: metadata?.tabID ?? -Int64(tab.tabIndex),
-                title: tab.title, url: tab.url,
-                groupID: window?.groupID ?? -1, groupName: window?.groupName ?? "Unknown",
-                windowID: window?.id, windowUUID: window?.uuid,
-                activeProfileID: window?.profileID, activeProfileName: window?.profileName,
-                isActiveGroup: window != nil, isActiveTab: tab.selected,
+                title: tab.title,
+                url: tab.url,
+                groupID: window?.groupID ?? -1,
+                groupName: window?.groupName ?? "Unknown",
+                windowID: window?.id,
+                windowUUID: window?.uuid,
+                activeProfileID: window?.profileID,
+                activeProfileName: window?.profileName,
+                isActiveGroup: window != nil,
+                isActiveTab: tab.selected,
                 tabIndex: Int64(tab.tabIndex),
                 safariWindowID: tab.windowID
             )
@@ -76,7 +78,12 @@ actor LiveTabStore {
 
     private static func windows() throws -> [SafariWindowMetadata] {
         var connection: OpaquePointer?
-        let status = sqlite3_open_v2(TabStore.defaultPath, &connection, SQLITE_OPEN_READONLY, nil)
+        let status = sqlite3_open_v2(
+            TabStore.defaultPath,
+            &connection,
+            SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,
+            nil
+        )
         guard status == SQLITE_OK, let db = connection else {
             if let connection { sqlite3_close(connection) }
             throw TabStoreError.open(status)
@@ -109,13 +116,17 @@ actor LiveTabStore {
                 let data = Data(bytes: bytes, count: Int(sqlite3_column_bytes(statement, 6)))
                 ids = restoredWindowIDs(data)
             }
-            result.append(SafariWindowMetadata(
-                id: sqlite3_column_int64(statement, 0), uuid: text(1) ?? "",
-                profileID: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 2),
-                profileName: text(3),
-                groupID: sqlite3_column_type(statement, 4) == SQLITE_NULL ? -1 : sqlite3_column_int64(statement, 4),
-                groupName: text(5) ?? "Unknown", restoredWindowIDs: ids
-            ))
+            result.append(
+                SafariWindowMetadata(
+                    id: sqlite3_column_int64(statement, 0),
+                    uuid: text(1) ?? "",
+                    profileID: sqlite3_column_type(statement, 2) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 2),
+                    profileName: text(3),
+                    groupID: sqlite3_column_type(statement, 4) == SQLITE_NULL ? -1 : sqlite3_column_int64(statement, 4),
+                    groupName: text(5) ?? "Unknown",
+                    restoredWindowIDs: ids
+                )
+            )
         }
     }
 

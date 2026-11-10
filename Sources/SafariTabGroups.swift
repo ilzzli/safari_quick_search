@@ -55,8 +55,7 @@ actor SafariTabGroups: TabGroupsInterface {
             let profileID = String(sqlite3_column_int64(statement, 0))
             if titles[profileID] == nil {
                 profileOrder.append(profileID)
-                let title = text(1) ?? ""
-                titles[profileID] = title.isEmpty ? "Default" : title
+                titles[profileID] = SafariTabGroup.normalizedProfileName(text(1))
             }
             guard sqlite3_column_type(statement, 2) != SQLITE_NULL else { continue }
             let windowID = String(sqlite3_column_int64(statement, 2))
@@ -73,19 +72,26 @@ actor SafariTabGroups: TabGroupsInterface {
                 let groupID = String(sqlite3_column_int64(statement, 5))
                 let title = text(6) ?? ""
                 if windows[key]?.groups.contains(where: { $0.id == groupID }) == false {
-                    windows[key]?.groups.append(SafariTabGroup(
-                        id: groupID, title: title.isEmpty ? "Unnamed" : title
-                    ))
+                    windows[key]?.groups.append(
+                        SafariTabGroup(
+                            id: groupID,
+                            title: title.isEmpty ? "Unnamed" : title
+                        )
+                    )
                 }
             }
         }
         return profileOrder.map { profileID in
             SafariProfileGroups(
-                id: profileID, title: titles[profileID] ?? "Unnamed profile",
+                id: profileID,
+                title: titles[profileID] ?? "Default",
                 windows: (windowOrder[profileID] ?? []).compactMap { key in
                     guard let data = windows[key] else { return nil }
                     return SafariWindowTabGroups(
-                        id: key, windowTitle: data.title, groups: data.groups, activeGroupID: data.active
+                        id: key,
+                        windowTitle: data.title,
+                        groups: data.groups,
+                        activeGroupID: data.active
                     )
                 }
             )

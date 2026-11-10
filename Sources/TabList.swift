@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 struct RowBoundsPreferenceKey: PreferenceKey {
@@ -17,15 +16,13 @@ struct TabList: View {
     let items: [TabItem]
     let isRefreshing: Bool
     let selectedID: TabItem.ID?
-    let tabGroups: any TabGroupsInterface
+    let allProfiles: [SafariProfileGroups]
     let showAllWindowsInPopup: Bool
-    let refreshID: UUID
     @Binding var hoveredTab: TabItem?
     let onSelect: (TabItem) -> Void
 
     @State private var hoveredID: TabItem.ID?
     @State private var unhoverTask: Task<Void, Never>?
-    @State private var allProfiles: [SafariProfileGroups] = []
     @State private var isScrolling = false
     @State private var pointerLocation: CGPoint?
 
@@ -101,8 +98,6 @@ struct TabList: View {
                     OpenTabProfilesPopupOverlay(
                         items: items,
                         activeItem: activeOpenedItem,
-                        selectedItemID: selectedID,
-                        hoveredItemID: hoveredID,
                         pointerLocation: pointerLocation,
                         allProfiles: allProfiles,
                         showAllWindows: showAllWindowsInPopup,
@@ -125,11 +120,6 @@ struct TabList: View {
                     self.hoveredID = nil
                 }
                 hoveredTab = activePopupID.flatMap { targetID in updatedItems.first { $0.id == targetID } }
-            }
-        }
-        .task(id: refreshID) {
-            if let loaded = try? await tabGroups.profiles(), !Task.isCancelled {
-                allProfiles = loaded
             }
         }
         .opacity(isRefreshing ? 0.55 : 1)
@@ -231,4 +221,3 @@ private struct TabRow: View {
         .accessibilityLabel(item.title + ", " + item.subtitle)
     }
 }
-

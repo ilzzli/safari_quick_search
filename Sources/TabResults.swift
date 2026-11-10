@@ -1,12 +1,14 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 /// Owns loading state; TabList only renders the resulting items.
 struct TabResults: View {
     let supplier: any TabSupplierInterface
-    let tabGroups: any TabGroupsInterface
+    let profiles: [SafariProfileGroups]
     let input: String
     @Binding var hoveredTab: TabItem?
+    @Binding var snapshotID: UUID
 
     private struct Request: Equatable {
         let input: String
@@ -18,7 +20,6 @@ struct TabResults: View {
     @State private var isRefreshing = true
     @State private var errorMessage: String?
     @State private var showAllWindowsInPopup = false
-    @Binding var snapshotID: UUID
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -41,9 +42,8 @@ struct TabResults: View {
                     items: items,
                     isRefreshing: isRefreshing,
                     selectedID: selectedID,
-                    tabGroups: tabGroups,
+                    allProfiles: profiles,
                     showAllWindowsInPopup: showAllWindowsInPopup,
-                    refreshID: snapshotID,
                     hoveredTab: $hoveredTab
                 ) { tab in
                     hoveredTab = nil
@@ -92,10 +92,14 @@ struct TabResults: View {
             isRefreshing = false
         }
     }
+
     private func handleKey(_ code: UInt16, shift: Bool) -> Bool {
         guard !isRefreshing, errorMessage == nil, !items.isEmpty else { return false }
-        if code == 48 || code == 125 || code == 126 {
-            let backwards = code == 126 || (code == 48 && shift)
+        let isTab = code == UInt16(kVK_Tab)
+        let isDownArrow = code == UInt16(kVK_DownArrow)
+        let isUpArrow = code == UInt16(kVK_UpArrow)
+        if isTab || isDownArrow || isUpArrow {
+            let backwards = isUpArrow || (isTab && shift)
             let current = items.firstIndex { $0.id == selectedID }
             let step = backwards ? -1 : 1
             let next = current.map { ($0 + step + items.count) % items.count }
@@ -103,13 +107,12 @@ struct TabResults: View {
             selectedID = items[next].id
             return true
         }
-        guard code == 36 || code == 76,
-              let item = items.first(where: { $0.id == selectedID }) else { return false }
+        let isReturn = code == UInt16(kVK_Return) || code == UInt16(kVK_ANSI_KeypadEnter)
+        guard isReturn, let item = items.first(where: { $0.id == selectedID }) else { return false }
         hoveredTab = nil
         Task { await supplier.select(item) }
         return true
     }
-
 }
 
 /// Scope keyboard handling to the search panel, including its text field editor.
@@ -149,16 +152,16 @@ private struct ResultKeyboardHandler: NSViewRepresentable {
                       NSApp.modalWindow == nil else { return event }
                 let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                     .subtracting([.capsLock, .numericPad, .function])
-                if event.keyCode == 48 && flags == [.option] {
+                if event.keyCode == UInt16(kVK_Tab) && flags == [.option] {
                     self.onOptionTab?()
                     return nil
                 }
-                guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
-                      (!event.modifierFlags.contains(.shift) || event.keyCode == 48) else { return event }
+                guard flags.intersection([.command, .option, .control]).isEmpty,
+                      (!flags.contains(.shift) || event.keyCode == UInt16(kVK_Tab)) else { return event }
                 if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() {
                     return event
                 }
-                return self.onKey?(event.keyCode, event.modifierFlags.contains(.shift)) == true ? nil : event
+                return self.onKey?(event.keyCode, flags.contains(.shift)) == true ? nil : event
             }
         }
 

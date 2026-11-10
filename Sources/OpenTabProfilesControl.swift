@@ -27,8 +27,6 @@ struct OpenTabProfilesControl: View {
 struct OpenTabProfilesPopupOverlay: View {
     let items: [TabItem]
     let activeItem: TabItem?
-    let selectedItemID: TabItem.ID?
-    let hoveredItemID: TabItem.ID?
     let pointerLocation: CGPoint?
     let allProfiles: [SafariProfileGroups]
     let showAllWindows: Bool
@@ -63,8 +61,8 @@ struct OpenTabProfilesPopupOverlay: View {
         for tab in tabs {
             guard tab.windowID != nil else { continue }
             let id = String(tab.activeProfileID ?? -1)
-            let name = tab.activeProfileName.flatMap { $0.isEmpty ? nil : $0 } ?? "Default"
-            let groupTitle = ["local", "unnamed", ""].contains(tab.groupName.lowercased()) ? "Base" : tab.groupName
+            let name = SafariTabGroup.normalizedProfileName(tab.activeProfileName)
+            let groupTitle = SafariTabGroup.normalizedTitle(tab.groupName)
             if let index = result.firstIndex(where: { $0.id == id }) {
                 if !result[index].groups.contains(where: { $0.title == groupTitle }) {
                     result[index].groups.append(GroupChip(title: groupTitle, isHighlighted: true))
