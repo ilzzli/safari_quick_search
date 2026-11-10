@@ -11,35 +11,15 @@ struct OpenTabIconAnchorKey: PreferenceKey {
     }
 }
 
-/// The trailing window icon inside an opened-tab row; reports its bounds for the singleton popup.
+/// Invisible trailing anchor inside an opened-tab row; reports its bounds for the singleton popup.
 struct OpenTabProfilesControl: View {
     let itemID: TabItem.ID
-    let isExpanded: Bool
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        let icon = Image(systemName: "macwindow")
-            .font(.system(size: 14))
-            .foregroundStyle(isExpanded ? .primary : .secondary)
-            .frame(width: 34, height: 32)
+        Color.clear
+            .frame(width: 1, height: 32)
+            .anchorPreference(key: OpenTabIconAnchorKey.self, value: .bounds) { [itemID: $0] }
             .accessibilityHidden(true)
-
-        Group {
-            if reduceTransparency {
-                icon
-                    .background(Color(nsColor: .windowBackgroundColor).opacity(isExpanded ? 1 : 0.45), in: shape)
-                    .overlay {
-                        shape.strokeBorder(Color.primary.opacity(isExpanded ? 0.18 : 0.08), lineWidth: 1)
-                    }
-            } else {
-                icon
-                    .glassEffect(.regular, in: shape)
-            }
-        }
-        .anchorPreference(key: OpenTabIconAnchorKey.self, value: .bounds) { [itemID: $0] }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Open tab profiles")
     }
 }
 
@@ -47,36 +27,83 @@ struct OpenTabProfilesControl: View {
 struct OpenTabProfilesPopupOverlay: View {
     let items: [TabItem]
     let activeItem: TabItem?
+    let allProfiles: [SafariProfileGroups]
+    let showAllWindows: Bool
     let anchors: [TabItem.ID: Anchor<CGRect>]
     let proxy: GeometryProxy
 
     @State private var displayedItem: TabItem?
-    @State private var isPresented = false
+    @State private var appearProgress: CGFloat = 0
     @State private var glideGeneration = 0
+    @State private var dismissTask: Task<Void, Never>?
     @State private var measuredSizes: [TabItem.ID: CGSize] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    private struct Profile: Equatable {
-        let id: Int64
-        let name: String
-        var groups: [String]
+    private struct GroupChip: Equatable {
+        let title: String
+        let isHighlighted: Bool
     }
 
-    private func profiles(for tabs: [SafariTabMatch]) -> [Profile] {
-        var result: [Profile] = []
+    private struct ProfileEntry: Equatable {
+        let id: String
+        let name: String
+        var groups: [GroupChip]
+        var hasMatch: Bool
+    }
+
+    private func matchedProfiles(for tabs: [SafariTabMatch]) -> [ProfileEntry] {
+        var result: [ProfileEntry] = []
         for tab in tabs {
             guard tab.windowID != nil else { continue }
-            let id = tab.activeProfileID ?? -1
+            let id = String(tab.activeProfileID ?? -1)
             let name = tab.activeProfileName.flatMap { $0.isEmpty ? nil : $0 } ?? "Default"
-            let group = ["local", "unnamed", ""].contains(tab.groupName.lowercased()) ? "Base" : tab.groupName
+            let groupTitle = ["local", "unnamed", ""].contains(tab.groupName.lowercased()) ? "Base" : tab.groupName
             if let index = result.firstIndex(where: { $0.id == id }) {
-                if !result[index].groups.contains(group) { result[index].groups.append(group) }
+                if !result[index].groups.contains(where: { $0.title == groupTitle }) {
+                    result[index].groups.append(GroupChip(title: groupTitle, isHighlighted: true))
+                }
             } else {
-                result.append(Profile(id: id, name: name, groups: [group]))
+                result.append(
+                    ProfileEntry(
+                        id: id,
+                        name: name,
+                        groups: [GroupChip(title: groupTitle, isHighlighted: true)],
+                        hasMatch: true
+                    )
+                )
             }
         }
         return result
+    }
+
+    private func allWindowProfiles(for tabs: [SafariTabMatch]) -> [ProfileEntry] {
+        guard !allProfiles.isEmpty else {
+            return matchedProfiles(for: tabs)
+        }
+        return allProfiles.map { profile in
+            let matchingGroupIDs = Set(
+                tabs.filter {
+                    $0.activeProfileID.map(String.init) == profile.id && $0.windowID != nil
+                }.map { String($0.groupID) }
+            )
+            let chips = profile.groups.map { group in
+                GroupChip(
+                    title: group.title,
+                    isHighlighted: !group.sourceIDs.isDisjoint(with: matchingGroupIDs)
+                )
+            }
+            return ProfileEntry(
+                id: profile.id,
+                name: profile.title,
+                groups: chips,
+                hasMatch: chips.contains(where: \.isHighlighted)
+            )
+        }
+    }
+
+    private func profiles(for tabs: [SafariTabMatch]) -> [ProfileEntry] {
+        showAllWindows ? allWindowProfiles(for: tabs) : matchedProfiles(for: tabs)
     }
 
     private var activeAnchorExists: Bool {
@@ -89,7 +116,7 @@ struct OpenTabProfilesPopupOverlay: View {
             if let item = displayedItem, let anchor = anchors[item.id] {
                 let iconRect = proxy[anchor]
                 let isWithinVisibleBounds = iconRect.minY >= 0 && iconRect.maxY <= proxy.size.height
-                let visible = isPresented && isWithinVisibleBounds
+                let effectiveProgress = isWithinVisibleBounds ? appearProgress : 0
 
                 let targetSize = measuredSizes[item.id]
                 let popupHeight = targetSize?.height ?? 44
@@ -100,20 +127,19 @@ struct OpenTabProfilesPopupOverlay: View {
                 )
 
                 popupInnerContent(for: item)
-                    .accessibilityHidden(!isPresented)
+                    .accessibilityHidden(effectiveProgress == 0)
                     .modifier(
                         AnimatablePopupLayoutModifier(
                             width: targetSize?.width,
                             height: targetSize?.height,
                             rightX: iconRect.maxX,
                             centerY: clampedCenterY,
-                            visible: visible,
-                            appearOffsetY: iconRect.midY - clampedCenterY,
-                            reduceMotion: reduceMotion,
+                            appearProgress: effectiveProgress,
                             reduceTransparency: reduceTransparency
                         )
                     )
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: glideGeneration)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: isWithinVisibleBounds)
             }
         }
         .frame(width: proxy.size.width, height: proxy.size.height)
@@ -140,27 +166,46 @@ struct OpenTabProfilesPopupOverlay: View {
         .onChange(of: activeAnchorExists) { _, _ in
             syncPopupState()
         }
+        .onChange(of: showAllWindows) { _, _ in
+            glideGeneration &+= 1
+        }
     }
 
     private func syncPopupState() {
+        dismissTask?.cancel()
+        dismissTask = nil
+
         if let activeItem, anchors[activeItem.id] != nil {
-            if !isPresented {
-                let wasNil = (displayedItem == nil)
+            if displayedItem == nil {
                 displayedItem = activeItem
-                if wasNil {
-                    Task { @MainActor in
-                        guard self.activeItem != nil else { return }
-                        self.isPresented = true
+                appearProgress = 0
+                Task { @MainActor in
+                    guard self.activeItem != nil else { return }
+                    withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                        self.appearProgress = 1
                     }
-                } else {
-                    isPresented = true
+                }
+            } else if appearProgress < 1 {
+                displayedItem = activeItem
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
+                    appearProgress = 1
                 }
             } else if displayedItem != activeItem {
                 displayedItem = activeItem
                 glideGeneration &+= 1
             }
         } else if activeItem == nil {
-            isPresented = false
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.20)) {
+                appearProgress = 0
+            }
+            let delayMs = reduceMotion ? 0 : 210
+            dismissTask = Task { @MainActor in
+                if delayMs > 0 {
+                    try? await Task.sleep(for: .milliseconds(delayMs))
+                }
+                guard !Task.isCancelled, self.activeItem == nil else { return }
+                self.displayedItem = nil
+            }
         }
     }
 
@@ -173,13 +218,32 @@ struct OpenTabProfilesPopupOverlay: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(Array(itemProfiles.enumerated()), id: \.offset) { _, profile in
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 4) {
                     Label(profile.name, systemImage: "person.crop.circle")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.primary)
-                    Text(profile.groups.joined(separator: " · "))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(profile.hasMatch ? .primary : .secondary)
+                    if showAllWindows {
+                        HStack(spacing: 4) {
+                            ForEach(Array(profile.groups.enumerated()), id: \.offset) { _, group in
+                                Label(
+                                    group.title,
+                                    systemImage: group.isHighlighted ? "checkmark.circle.fill" : "rectangle.on.rectangle"
+                                )
+                                .font(.caption2.weight(group.isHighlighted ? .semibold : .regular))
+                                .foregroundStyle(group.isHighlighted ? .primary : .secondary)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(
+                                    group.isHighlighted ? Color.yellow.opacity(0.22) : Color.secondary.opacity(0.08),
+                                    in: Capsule()
+                                )
+                            }
+                        }
+                    } else {
+                        Text(profile.groups.map(\.title).joined(separator: " · "))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .lineLimit(1)
                 .fixedSize()
@@ -196,9 +260,7 @@ struct AnimatablePopupLayoutModifier: ViewModifier, Animatable {
     var height: CGFloat
     var rightX: CGFloat
     var centerY: CGFloat
-    let visible: Bool
-    let appearOffsetY: CGFloat
-    let reduceMotion: Bool
+    var appearProgress: CGFloat
     let hasMeasuredSize: Bool
     let reduceTransparency: Bool
 
@@ -207,9 +269,7 @@ struct AnimatablePopupLayoutModifier: ViewModifier, Animatable {
         height: CGFloat?,
         rightX: CGFloat,
         centerY: CGFloat,
-        visible: Bool = true,
-        appearOffsetY: CGFloat = 0,
-        reduceMotion: Bool = false,
+        appearProgress: CGFloat = 1,
         reduceTransparency: Bool
     ) {
         if let width, let height {
@@ -223,69 +283,79 @@ struct AnimatablePopupLayoutModifier: ViewModifier, Animatable {
         }
         self.rightX = rightX
         self.centerY = centerY
-        self.visible = visible
-        self.appearOffsetY = appearOffsetY
-        self.reduceMotion = reduceMotion
+        self.appearProgress = appearProgress
         self.reduceTransparency = reduceTransparency
     }
 
     var animatableData: AnimatablePair<
-        AnimatablePair<CGFloat, CGFloat>,
-        AnimatablePair<CGFloat, CGFloat>
+        AnimatablePair<
+            AnimatablePair<CGFloat, CGFloat>,
+            AnimatablePair<CGFloat, CGFloat>
+        >,
+        CGFloat
     > {
         get {
             AnimatablePair(
-                AnimatablePair(width, height),
-                AnimatablePair(rightX, centerY)
+                AnimatablePair(
+                    AnimatablePair(width, height),
+                    AnimatablePair(rightX, centerY)
+                ),
+                appearProgress
             )
         }
         set {
-            width = newValue.first.first
-            height = newValue.first.second
-            rightX = newValue.second.first
-            centerY = newValue.second.second
+            width = newValue.first.first.first
+            height = newValue.first.first.second
+            rightX = newValue.first.second.first
+            centerY = newValue.first.second.second
+            appearProgress = newValue.second
         }
     }
 
     func body(content: Content) -> some View {
+        let clampedProgress = min(max(appearProgress, 0), 1)
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
-        let w = max(width, 1)
-        let h = max(height, 1)
+        let currentWidth = max(width * clampedProgress, 0)
+        let currentHeight = max(height * (0.65 + 0.35 * clampedProgress), 0)
 
-        let framed = Group {
-            if hasMeasuredSize {
-                content
-                    .frame(width: w, height: h, alignment: .leading)
-                    .clipped()
-                    .clipShape(shape)
-            } else {
-                content
-                    .clipShape(shape)
-            }
-        }
+        Group {
+            if clampedProgress > 0.01 {
+                let w = max(currentWidth, 1)
+                let h = max(currentHeight, 1)
 
-        let styled = Group {
-            if reduceTransparency {
-                framed
-                    .background(Color(nsColor: .windowBackgroundColor), in: shape)
-                    .overlay {
-                        shape.strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                let framed = Group {
+                    if hasMeasuredSize {
+                        content
+                            .opacity(clampedProgress)
+                            .frame(width: w, height: h, alignment: .leading)
+                            .clipped()
+                            .clipShape(shape)
+                    } else {
+                        content
+                            .opacity(clampedProgress)
+                            .clipShape(shape)
                     }
-            } else {
-                framed
-                    .glassEffect(.regular, in: shape)
-                    .clipShape(shape)
+                }
+
+                let styled = Group {
+                    if reduceTransparency {
+                        framed
+                            .background(Color(nsColor: .windowBackgroundColor), in: shape)
+                            .overlay {
+                                shape.strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                            }
+                    } else {
+                        framed
+                            .glassEffect(.regular, in: shape)
+                    }
+                }
+
+                styled
+                    .position(
+                        x: hasMeasuredSize ? (rightX - w / 2) : rightX,
+                        y: centerY
+                    )
             }
         }
-
-        styled
-            .scaleEffect(visible ? 1.0 : 0.18, anchor: .trailing)
-            .opacity(visible ? 1.0 : 0.0)
-            .offset(y: visible ? 0 : appearOffsetY)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: visible)
-            .position(
-                x: hasMeasuredSize ? (rightX - w / 2) : rightX,
-                y: centerY
-            )
     }
 }

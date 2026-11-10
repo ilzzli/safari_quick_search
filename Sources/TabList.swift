@@ -6,11 +6,14 @@ struct TabList: View {
     let isRefreshing: Bool
     let selectedID: TabItem.ID?
     let tabGroups: any TabGroupsInterface
+    let showAllWindowsInPopup: Bool
+    let refreshID: UUID
     @Binding var hoveredTab: TabItem?
     let onSelect: (TabItem) -> Void
 
     @State private var hoveredID: TabItem.ID?
     @State private var unhoverTask: Task<Void, Never>?
+    @State private var allProfiles: [SafariProfileGroups] = []
 
     /// Hovered row always has priority over keyboard-selected row.
     private var activePopupID: TabItem.ID? {
@@ -26,52 +29,58 @@ struct TabList: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-        ScrollView {
-            LazyVStack(spacing: 5) {
-                ForEach(items) { item in
-                    TabRow(
-                        item: item,
-                        isSelected: selectedID == item.id,
-                        isPopupExpanded: activePopupID == item.id
-                    ) {
-                        onSelect(item)
-                    }
-                    .onHover { inside in
-                        handleRowHover(item: item, inside: inside)
-                    }
-                    .onDisappear {
-                        if hoveredID == item.id {
-                            unhoverTask?.cancel()
-                            hoveredID = nil
+            ScrollView {
+                LazyVStack(spacing: 5) {
+                    ForEach(items) { item in
+                        TabRow(
+                            item: item,
+                            isSelected: selectedID == item.id
+                        ) {
+                            onSelect(item)
+                        }
+                        .onHover { inside in
+                            handleRowHover(item: item, inside: inside)
+                        }
+                        .onDisappear {
+                            if hoveredID == item.id {
+                                unhoverTask?.cancel()
+                                hoveredID = nil
+                            }
                         }
                     }
                 }
+                .padding(10)
             }
-            .padding(10)
-        }
-        .overlayPreferenceValue(OpenTabIconAnchorKey.self) { anchors in
-            GeometryReader { geometry in
-                OpenTabProfilesPopupOverlay(
-                    items: items,
-                    activeItem: activeOpenedItem,
-                    anchors: anchors,
-                    proxy: geometry
-                )
+            .overlayPreferenceValue(OpenTabIconAnchorKey.self) { anchors in
+                GeometryReader { geometry in
+                    OpenTabProfilesPopupOverlay(
+                        items: items,
+                        activeItem: activeOpenedItem,
+                        allProfiles: allProfiles,
+                        showAllWindows: showAllWindowsInPopup,
+                        anchors: anchors,
+                        proxy: geometry
+                    )
+                }
+            }
+            .onChange(of: selectedID) { _, id in
+                if let id { proxy.scrollTo(id) }
+            }
+            .onChange(of: activePopupID, initial: true) { _, id in
+                guard !isRefreshing else { return }
+                hoveredTab = id.flatMap { targetID in items.first { $0.id == targetID } }
+            }
+            .onChange(of: items) { _, updatedItems in
+                if let hoveredID, !updatedItems.contains(where: { $0.id == hoveredID }) {
+                    self.hoveredID = nil
+                }
+                hoveredTab = activePopupID.flatMap { targetID in updatedItems.first { $0.id == targetID } }
             }
         }
-        .onChange(of: selectedID) { _, id in
-            if let id { proxy.scrollTo(id) }
-        }
-        .onChange(of: activePopupID, initial: true) { _, id in
-            guard !isRefreshing else { return }
-            hoveredTab = id.flatMap { targetID in items.first { $0.id == targetID } }
-        }
-        .onChange(of: items) { _, updatedItems in
-            if let hoveredID, !updatedItems.contains(where: { $0.id == hoveredID }) {
-                self.hoveredID = nil
+        .task(id: refreshID) {
+            if let loaded = try? await tabGroups.profiles(), !Task.isCancelled {
+                allProfiles = loaded
             }
-            hoveredTab = activePopupID.flatMap { targetID in updatedItems.first { $0.id == targetID } }
-        }
         }
         .opacity(isRefreshing ? 0.55 : 1)
         .disabled(isRefreshing)
@@ -99,7 +108,6 @@ struct TabList: View {
 private struct TabRow: View {
     let item: TabItem
     let isSelected: Bool
-    let isPopupExpanded: Bool
     let onSelect: () -> Void
     @State private var isHovered = false
     @Environment(\.colorSchemeContrast) private var contrast
@@ -138,7 +146,7 @@ private struct TabRow: View {
                 }
                 Spacer(minLength: 0)
                 if item.type == .OPENED_TAB {
-                    OpenTabProfilesControl(itemID: item.id, isExpanded: isPopupExpanded)
+                    OpenTabProfilesControl(itemID: item.id)
                 }
             }
             .padding(.horizontal, 14)

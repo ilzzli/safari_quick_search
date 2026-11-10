@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 /// Owns loading state; TabList only renders the resulting items.
@@ -17,6 +18,7 @@ struct TabResults: View {
     @State private var items: [TabItem] = []
     @State private var isRefreshing = true
     @State private var errorMessage: String?
+    @State private var showAllWindowsInPopup = false
     @Binding var snapshotID: UUID
 
     var body: some View {
@@ -36,13 +38,30 @@ struct TabResults: View {
                     .opacity(isRefreshing ? 0 : 1)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                TabList(items: items, isRefreshing: isRefreshing, selectedID: selectedID, tabGroups: tabGroups, hoveredTab: $hoveredTab) { tab in
+                TabList(
+                    items: items,
+                    isRefreshing: isRefreshing,
+                    selectedID: selectedID,
+                    tabGroups: tabGroups,
+                    showAllWindowsInPopup: showAllWindowsInPopup,
+                    refreshID: snapshotID,
+                    hoveredTab: $hoveredTab
+                ) { tab in
                     hoveredTab = nil
                     Task { await supplier.select(tab) }
                 }
             }
         }
-        .background(ResultKeyboardHandler(onKey: handleKey))
+        .background(
+            ResultKeyboardHandler(
+                onKey: handleKey,
+                onCommandTab: {
+                    withAnimation(.easeInOut(duration: 0.24)) {
+                        showAllWindowsInPopup.toggle()
+                    }
+                }
+            )
+        )
         .task {
             // Refresh only on a hidden-to-visible transition, not when an alert
             // closes or the panel regains keyboard focus.
@@ -97,15 +116,18 @@ struct TabResults: View {
 /// Scope keyboard handling to the search panel, including its text field editor.
 private struct ResultKeyboardHandler: NSViewRepresentable {
     let onKey: (UInt16, Bool) -> Bool
+    let onCommandTab: () -> Void
 
     func makeNSView(context: Context) -> KeyView {
         let view = KeyView()
         view.onKey = onKey
+        view.onCommandTab = onCommandTab
         return view
     }
 
     func updateNSView(_ view: KeyView, context: Context) {
         view.onKey = onKey
+        view.onCommandTab = onCommandTab
     }
 
     static func dismantleNSView(_ view: KeyView, coordinator: ()) {
@@ -113,19 +135,49 @@ private struct ResultKeyboardHandler: NSViewRepresentable {
     }
 
     final class KeyView: NSView {
+        private static let cmdTabHotKeyID = EventHotKeyID(signature: 0x53515348, id: 2)
         var onKey: ((UInt16, Bool) -> Bool)?
+        var onCommandTab: (() -> Void)?
         private var monitor: Any?
+        private var windowObservers: [NSObjectProtocol] = []
+        private var cmdTabHotKey: EventHotKeyRef?
+        private var cmdTabHandler: EventHandlerRef?
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             stop()
-            guard window != nil else { return }
+            guard let window else { return }
+
+            let nc = NotificationCenter.default
+            windowObservers.append(
+                nc.addObserver(forName: NSWindow.didBecomeKeyNotification, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updateCmdTabHotKey() }
+                }
+            )
+            windowObservers.append(
+                nc.addObserver(forName: NSWindow.didResignKeyNotification, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updateCmdTabHotKey() }
+                }
+            )
+            windowObservers.append(
+                nc.addObserver(forName: AppActions.panelDidOpenNotification, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.updateCmdTabHotKey() }
+                }
+            )
+            updateCmdTabHotKey()
+
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard let self, let window = self.window,
                       window.isVisible, window.isKeyWindow, event.window === window,
-                      event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
-                      (!event.modifierFlags.contains(.shift) || event.keyCode == 48),
                       NSApp.modalWindow == nil else { return event }
+                let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                    .subtracting([.capsLock, .numericPad, .function])
+                if event.keyCode == 48 && flags == [.command] {
+                    self.onCommandTab?()
+                    return nil
+                }
+                guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty,
+                      (!event.modifierFlags.contains(.shift) || event.keyCode == 48) else { return event }
                 if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() {
                     return event
                 }
@@ -133,7 +185,73 @@ private struct ResultKeyboardHandler: NSViewRepresentable {
             }
         }
 
+        private func updateCmdTabHotKey() {
+            if let window, window.isVisible, window.isKeyWindow {
+                registerCmdTabHotKey()
+            } else {
+                unregisterCmdTabHotKey()
+            }
+        }
+
+        private func registerCmdTabHotKey() {
+            guard cmdTabHotKey == nil else { return }
+            if cmdTabHandler == nil {
+                var eventType = EventTypeSpec(
+                    eventClass: OSType(kEventClassKeyboard),
+                    eventKind: UInt32(kEventHotKeyPressed)
+                )
+                InstallEventHandler(
+                    GetEventDispatcherTarget(),
+                    { _, event, context in
+                        guard let event, let context else { return OSStatus(eventNotHandledErr) }
+                        var identifier = EventHotKeyID()
+                        let status = GetEventParameter(
+                            event, EventParamName(kEventParamDirectObject),
+                            EventParamType(typeEventHotKeyID), nil,
+                            MemoryLayout<EventHotKeyID>.size, nil, &identifier
+                        )
+                        guard status == noErr,
+                              identifier.signature == KeyView.cmdTabHotKeyID.signature,
+                              identifier.id == KeyView.cmdTabHotKeyID.id else {
+                            return OSStatus(eventNotHandledErr)
+                        }
+                        MainActor.assumeIsolated {
+                            let view = Unmanaged<KeyView>.fromOpaque(context).takeUnretainedValue()
+                            guard let window = view.window, window.isVisible, window.isKeyWindow else { return }
+                            view.onCommandTab?()
+                        }
+                        return noErr
+                    },
+                    1, &eventType, Unmanaged.passUnretained(self).toOpaque(), &cmdTabHandler
+                )
+            }
+            RegisterEventHotKey(
+                UInt32(kVK_Tab),
+                UInt32(cmdKey),
+                Self.cmdTabHotKeyID,
+                GetEventDispatcherTarget(),
+                0,
+                &cmdTabHotKey
+            )
+        }
+
+        private func unregisterCmdTabHotKey() {
+            if let cmdTabHotKey {
+                UnregisterEventHotKey(cmdTabHotKey)
+                self.cmdTabHotKey = nil
+            }
+            if let cmdTabHandler {
+                RemoveEventHandler(cmdTabHandler)
+                self.cmdTabHandler = nil
+            }
+        }
+
         func stop() {
+            for observer in windowObservers {
+                NotificationCenter.default.removeObserver(observer)
+            }
+            windowObservers.removeAll()
+            unregisterCmdTabHotKey()
             if let monitor { NSEvent.removeMonitor(monitor) }
             monitor = nil
         }
