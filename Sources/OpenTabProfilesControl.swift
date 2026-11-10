@@ -27,8 +27,13 @@ struct OpenTabProfilesControl: View {
 struct OpenTabProfilesPopupOverlay: View {
     let items: [TabItem]
     let activeItem: TabItem?
+    let selectedItemID: TabItem.ID?
+    let hoveredItemID: TabItem.ID?
+    let pointerLocation: CGPoint?
     let allProfiles: [SafariProfileGroups]
     let showAllWindows: Bool
+    let isPointerHovered: Bool
+    let isScrolling: Bool
     let anchors: [TabItem.ID: Anchor<CGRect>]
     let proxy: GeometryProxy
 
@@ -37,6 +42,7 @@ struct OpenTabProfilesPopupOverlay: View {
     @State private var glideGeneration = 0
     @State private var dismissTask: Task<Void, Never>?
     @State private var measuredSizes: [TabItem.ID: CGSize] = [:]
+    @State private var frozenHoverCenterY: CGFloat?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -106,14 +112,38 @@ struct OpenTabProfilesPopupOverlay: View {
         showAllWindows ? allWindowProfiles(for: tabs) : matchedProfiles(for: tabs)
     }
 
+    /// Synchronously resolves the active opened-tab item on the exact frame the scroll offset changes,
+    /// using the live pointer location to hit-test the row under the cursor before `.onHover` catches up.
+    private var resolvedActiveItem: TabItem? {
+        if isPointerHovered, let point = pointerLocation {
+            var closestOpenedItem: TabItem?
+            var closestDistance = CGFloat.greatestFiniteMagnitude
+            for item in items where item.type == .OPENED_TAB {
+                guard let anchor = anchors[item.id] else { continue }
+                let rect = proxy[anchor]
+                let distance = abs(rect.midY - point.y)
+                if distance <= 36 && distance < closestDistance {
+                    closestDistance = distance
+                    closestOpenedItem = item
+                }
+            }
+            if let closestOpenedItem {
+                return closestOpenedItem
+            }
+        }
+        return activeItem
+    }
+
     private var activeAnchorExists: Bool {
-        guard let id = activeItem?.id else { return false }
+        guard let id = resolvedActiveItem?.id else { return false }
         return anchors[id] != nil
     }
 
     var body: some View {
+        let liveItem = resolvedActiveItem
+        let currentItem = liveItem ?? displayedItem
         ZStack(alignment: .bottomTrailing) {
-            if let item = displayedItem, let anchor = anchors[item.id] {
+            if let item = currentItem, let anchor = anchors[item.id] {
                 let iconRect = proxy[anchor]
                 let isWithinVisibleBounds = iconRect.minY >= 0 && iconRect.maxY <= proxy.size.height
                 let effectiveProgress = isWithinVisibleBounds ? appearProgress : 0
@@ -121,8 +151,11 @@ struct OpenTabProfilesPopupOverlay: View {
                 let targetSize = measuredSizes[item.id]
                 let popupHeight = targetSize?.height ?? 44
                 let halfHeight = popupHeight / 2
+                let rawCenterY = (isPointerHovered && isScrolling)
+                    ? (frozenHoverCenterY ?? iconRect.midY)
+                    : iconRect.midY
                 let clampedCenterY = min(
-                    max(iconRect.midY, halfHeight + 4),
+                    max(rawCenterY, halfHeight + 4),
                     max(proxy.size.height - halfHeight - 4, halfHeight + 4)
                 )
 
@@ -138,8 +171,10 @@ struct OpenTabProfilesPopupOverlay: View {
                             reduceTransparency: reduceTransparency
                         )
                     )
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: liveItem?.id)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: glideGeneration)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: isWithinVisibleBounds)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.20), value: isScrolling)
             }
         }
         .frame(width: proxy.size.width, height: proxy.size.height)
@@ -160,7 +195,7 @@ struct OpenTabProfilesPopupOverlay: View {
             .accessibilityHidden(true)
         }
         .allowsHitTesting(false)
-        .onChange(of: activeItem, initial: true) { _, _ in
+        .onChange(of: resolvedActiveItem, initial: true) { _, _ in
             syncPopupState()
         }
         .onChange(of: activeAnchorExists) { _, _ in
@@ -169,42 +204,55 @@ struct OpenTabProfilesPopupOverlay: View {
         .onChange(of: showAllWindows) { _, _ in
             glideGeneration &+= 1
         }
+        .onChange(of: isScrolling) { _, scrolling in
+            if scrolling {
+                if isPointerHovered, let item = resolvedActiveItem ?? displayedItem, let anchor = anchors[item.id] {
+                    frozenHoverCenterY = proxy[anchor].midY
+                }
+            } else {
+                frozenHoverCenterY = nil
+            }
+        }
     }
 
     private func syncPopupState() {
         dismissTask?.cancel()
         dismissTask = nil
 
-        if let activeItem, anchors[activeItem.id] != nil {
-            if displayedItem == nil {
-                displayedItem = activeItem
-                appearProgress = 0
+        if let activeItem = resolvedActiveItem, anchors[activeItem.id] != nil {
+            let wasHidden = (displayedItem == nil && appearProgress == 0)
+            displayedItem = activeItem
+            if isPointerHovered, !isScrolling, let anchor = anchors[activeItem.id] {
+                frozenHoverCenterY = proxy[anchor].midY
+            }
+            if wasHidden {
                 Task { @MainActor in
-                    guard self.activeItem != nil else { return }
+                    guard self.resolvedActiveItem != nil else { return }
                     withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
                         self.appearProgress = 1
                     }
                 }
             } else if appearProgress < 1 {
-                displayedItem = activeItem
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.22)) {
                     appearProgress = 1
                 }
-            } else if displayedItem != activeItem {
-                displayedItem = activeItem
-                glideGeneration &+= 1
             }
-        } else if activeItem == nil {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.20)) {
-                appearProgress = 0
-            }
-            let delayMs = reduceMotion ? 0 : 210
+        } else if resolvedActiveItem == nil {
+            let debounceMs = isScrolling ? 160 : 50
+            let closeAnimDuration = 0.20
+            let removeDelayMs = reduceMotion ? 0 : 210
             dismissTask = Task { @MainActor in
-                if delayMs > 0 {
-                    try? await Task.sleep(for: .milliseconds(delayMs))
+                try? await Task.sleep(for: .milliseconds(debounceMs))
+                guard !Task.isCancelled, self.resolvedActiveItem == nil else { return }
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: closeAnimDuration)) {
+                    self.appearProgress = 0
                 }
-                guard !Task.isCancelled, self.activeItem == nil else { return }
+                if removeDelayMs > 0 {
+                    try? await Task.sleep(for: .milliseconds(removeDelayMs))
+                }
+                guard !Task.isCancelled, self.resolvedActiveItem == nil else { return }
                 self.displayedItem = nil
+                self.frozenHoverCenterY = nil
             }
         }
     }

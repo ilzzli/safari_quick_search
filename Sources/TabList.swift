@@ -1,4 +1,16 @@
+import AppKit
 import SwiftUI
+
+struct RowBoundsPreferenceKey: PreferenceKey {
+    static let defaultValue: [TabItem.ID: Anchor<CGRect>] = [:]
+
+    static func reduce(
+        value: inout [TabItem.ID: Anchor<CGRect>],
+        nextValue: () -> [TabItem.ID: Anchor<CGRect>]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
 
 /// Displays supplied items and forwards selections without choosing their action.
 struct TabList: View {
@@ -14,6 +26,8 @@ struct TabList: View {
     @State private var hoveredID: TabItem.ID?
     @State private var unhoverTask: Task<Void, Never>?
     @State private var allProfiles: [SafariProfileGroups] = []
+    @State private var isScrolling = false
+    @State private var pointerLocation: CGPoint?
 
     /// Hovered row always has priority over keyboard-selected row.
     private var activePopupID: TabItem.ID? {
@@ -30,13 +44,17 @@ struct TabList: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 5) {
+                VStack(spacing: 5) {
                     ForEach(items) { item in
                         TabRow(
                             item: item,
-                            isSelected: selectedID == item.id
+                            isSelected: selectedID == item.id,
+                            isHovered: hoveredID == item.id
                         ) {
                             onSelect(item)
+                        }
+                        .anchorPreference(key: RowBoundsPreferenceKey.self, value: .bounds) {
+                            [item.id: $0]
                         }
                         .onHover { inside in
                             handleRowHover(item: item, inside: inside)
@@ -51,13 +69,45 @@ struct TabList: View {
                 }
                 .padding(10)
             }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    pointerLocation = location
+                case .ended:
+                    pointerLocation = nil
+                    unhoverTask?.cancel()
+                    hoveredID = nil
+                }
+            }
+            .onScrollPhaseChange { _, newPhase in
+                isScrolling = newPhase != .idle
+            }
+            .overlayPreferenceValue(RowBoundsPreferenceKey.self) { rowAnchors in
+                GeometryReader { geometry in
+                    let resolvedHoverID = resolveHoveredID(rowAnchors: rowAnchors, proxy: geometry)
+                    Color.clear
+                        .onChange(of: resolvedHoverID) { _, newHoverID in
+                            if let newHoverID, hoveredID != newHoverID {
+                                unhoverTask?.cancel()
+                                unhoverTask = nil
+                                hoveredID = newHoverID
+                            }
+                        }
+                }
+                .allowsHitTesting(false)
+            }
             .overlayPreferenceValue(OpenTabIconAnchorKey.self) { anchors in
                 GeometryReader { geometry in
                     OpenTabProfilesPopupOverlay(
                         items: items,
                         activeItem: activeOpenedItem,
+                        selectedItemID: selectedID,
+                        hoveredItemID: hoveredID,
+                        pointerLocation: pointerLocation,
                         allProfiles: allProfiles,
                         showAllWindows: showAllWindowsInPopup,
+                        isPointerHovered: hoveredID != nil,
+                        isScrolling: isScrolling,
                         anchors: anchors,
                         proxy: geometry
                     )
@@ -87,6 +137,23 @@ struct TabList: View {
         .scrollDisabled(isRefreshing)
     }
 
+    private func resolveHoveredID(
+        rowAnchors: [TabItem.ID: Anchor<CGRect>],
+        proxy: GeometryProxy
+    ) -> TabItem.ID? {
+        guard !isRefreshing else { return nil }
+        if hoveredID != nil, let point = pointerLocation {
+            for item in items {
+                guard let anchor = rowAnchors[item.id] else { continue }
+                let rect = proxy[anchor].insetBy(dx: 0, dy: -3)
+                if rect.contains(point) {
+                    return item.id
+                }
+            }
+        }
+        return hoveredID
+    }
+
     private func handleRowHover(item: TabItem, inside: Bool) {
         guard !isRefreshing else { return }
         if inside {
@@ -96,8 +163,9 @@ struct TabList: View {
         } else if hoveredID == item.id {
             unhoverTask?.cancel()
             let leavingID = item.id
+            let delayMs = isScrolling ? 200 : 45
             unhoverTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(45))
+                try? await Task.sleep(for: .milliseconds(delayMs))
                 guard !Task.isCancelled, hoveredID == leavingID else { return }
                 hoveredID = nil
             }
@@ -108,8 +176,8 @@ struct TabList: View {
 private struct TabRow: View {
     let item: TabItem
     let isSelected: Bool
+    let isHovered: Bool
     let onSelect: () -> Void
-    @State private var isHovered = false
     @Environment(\.colorSchemeContrast) private var contrast
 
     private var icon: String {
@@ -159,8 +227,6 @@ private struct TabRow: View {
             }
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .onDisappear { isHovered = false }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityLabel(item.title + ", " + item.subtitle)
     }
