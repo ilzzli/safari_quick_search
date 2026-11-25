@@ -1,10 +1,6 @@
 import AppKit
 import Darwin
 
-enum SwipeDirection: Sendable {
-    case left, right
-}
-
 /// Private MultitouchSupport ABI: 96-byte contacts, state at 20, normalized x/y at 32/36.
 /// See firedev/threefinger's mt.h. Resolve symbols at runtime; fail gracefully if unavailable.
 private typealias ContactCallback = @convention(c) (
@@ -79,7 +75,7 @@ private final class ContactRouter: @unchecked Sendable {
 }
 
 @MainActor
-final class ThreeFingerSwipeMonitor {
+final class ThreeFingerSwipeMonitor: SwipeMonitorInterface {
     private typealias CreateList = @convention(c) () -> Unmanaged<CFArray>?
     private typealias Register = @convention(c) (UnsafeMutableRawPointer?, ContactCallback?) -> Void
     private typealias Start = @convention(c) (UnsafeMutableRawPointer?, Int32) -> Void

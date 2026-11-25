@@ -8,10 +8,12 @@ private final class AppPanel: NSPanel {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let actions = AppActions()
+    private let swipeMonitor: any SwipeMonitorInterface = SystemSwipeEventMonitor()
     private lazy var hotkeys = HotkeyRegistration(
         actions: HotkeysActionsProvider(togglePanelAction: { [weak self] in
             self?.actions.togglePanel()
-        })
+        }),
+        swipeMonitor: swipeMonitor
     )
     private let tabSupplier: any TabSupplierInterface = TabSupplier(actions: TabActions())
     private let tabGroups: any TabGroupsInterface = SafariTabGroups()

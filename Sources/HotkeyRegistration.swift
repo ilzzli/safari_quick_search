@@ -5,15 +5,19 @@ import Carbon
 final class HotkeyRegistration: NSObject {
     private let actions: any HotkeysActionsInterface
     private let safari = SafariControl()
-    private let swipeMonitor = ThreeFingerSwipeMonitor()
+    private let swipeMonitor: any SwipeMonitorInterface
     private var hotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private weak var trackingMenu: NSMenu?
     private var menuKeyMonitor: Any?
     private var menuShortcutPressed = false
 
-    init(actions: any HotkeysActionsInterface) {
+    init(
+        actions: any HotkeysActionsInterface,
+        swipeMonitor: any SwipeMonitorInterface
+    ) {
         self.actions = actions
+        self.swipeMonitor = swipeMonitor
         super.init()
     }
 
