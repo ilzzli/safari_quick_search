@@ -278,12 +278,6 @@ private struct TabRow: View {
                     Text(item.title)
                         .font(.system(size: 14, weight: .medium))
                         .lineLimit(1)
-                    if let location = item.locationLabel {
-                        Text(location)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
                     Text(item.subtitle)
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
