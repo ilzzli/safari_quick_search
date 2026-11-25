@@ -13,6 +13,22 @@ struct RowBoundsPreferenceKey: PreferenceKey {
 
 /// Displays supplied items and forwards selections without choosing their action.
 struct TabList: View {
+    private enum StickyEdge: Equatable {
+        case top
+        case bottom
+    }
+
+    private struct StickyRowState: Equatable {
+        let item: TabItem
+        let edge: StickyEdge
+        let width: CGFloat
+        let height: CGFloat
+    }
+
+    private static let horizontalPadding: CGFloat = 10
+    private static let topPinPadding: CGFloat = 4
+    private static let bottomPinPadding: CGFloat = 10
+
     let items: [TabItem]
     let isRefreshing: Bool
     let selectedID: TabItem.ID?
@@ -22,6 +38,7 @@ struct TabList: View {
     let onSelect: (TabItem) -> Void
 
     @State private var hoveredID: TabItem.ID?
+    @State private var pinnedRowID: TabItem.ID?
     @State private var unhoverTask: Task<Void, Never>?
     @State private var isScrolling = false
     @State private var pointerLocation: CGPoint?
@@ -46,10 +63,12 @@ struct TabList: View {
                         TabRow(
                             item: item,
                             isSelected: selectedID == item.id,
-                            isHovered: hoveredID == item.id
+                            isHovered: hoveredID == item.id,
+                            isPinned: false
                         ) {
                             onSelect(item)
                         }
+                        .opacity(pinnedRowID == item.id ? 0 : 1)
                         .anchorPreference(key: RowBoundsPreferenceKey.self, value: .bounds) {
                             [item.id: $0]
                         }
@@ -64,7 +83,55 @@ struct TabList: View {
                         }
                     }
                 }
-                .padding(10)
+                .padding(.horizontal, Self.horizontalPadding)
+                .padding(.top, Self.topPinPadding)
+                .padding(.bottom, Self.bottomPinPadding)
+            }
+            .onScrollPhaseChange { _, newPhase in
+                isScrolling = newPhase != .idle
+            }
+            .overlayPreferenceValue(RowBoundsPreferenceKey.self) { rowAnchors in
+                GeometryReader { geometry in
+                    let stickyRow = resolveStickyRow(rowAnchors: rowAnchors, proxy: geometry)
+                    let resolvedHoverID = resolveHoveredID(
+                        rowAnchors: rowAnchors,
+                        stickyRow: stickyRow,
+                        proxy: geometry
+                    )
+
+                    ZStack(alignment: stickyRow?.edge == .bottom ? .bottom : .top) {
+                        Color.clear
+                            .allowsHitTesting(false)
+                            .onChange(of: resolvedHoverID) { _, newHoverID in
+                                if let newHoverID, hoveredID != newHoverID {
+                                    unhoverTask?.cancel()
+                                    unhoverTask = nil
+                                    hoveredID = newHoverID
+                                }
+                            }
+                            .onChange(of: stickyRow?.item.id, initial: true) { _, newPinnedID in
+                                pinnedRowID = newPinnedID
+                            }
+
+                        if let stickyRow {
+                            TabRow(
+                                item: stickyRow.item,
+                                isSelected: true,
+                                isHovered: hoveredID == stickyRow.item.id,
+                                isPinned: true
+                            ) {
+                                onSelect(stickyRow.item)
+                            }
+                            .frame(width: stickyRow.width)
+                            .padding(.top, stickyRow.edge == .top ? Self.topPinPadding : 0)
+                            .padding(.bottom, stickyRow.edge == .bottom ? Self.bottomPinPadding : 0)
+                            .onHover { inside in
+                                handleRowHover(item: stickyRow.item, inside: inside)
+                            }
+                        }
+                    }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                }
             }
             .onContinuousHover { phase in
                 switch phase {
@@ -75,23 +142,6 @@ struct TabList: View {
                     unhoverTask?.cancel()
                     hoveredID = nil
                 }
-            }
-            .onScrollPhaseChange { _, newPhase in
-                isScrolling = newPhase != .idle
-            }
-            .overlayPreferenceValue(RowBoundsPreferenceKey.self) { rowAnchors in
-                GeometryReader { geometry in
-                    let resolvedHoverID = resolveHoveredID(rowAnchors: rowAnchors, proxy: geometry)
-                    Color.clear
-                        .onChange(of: resolvedHoverID) { _, newHoverID in
-                            if let newHoverID, hoveredID != newHoverID {
-                                unhoverTask?.cancel()
-                                unhoverTask = nil
-                                hoveredID = newHoverID
-                            }
-                        }
-                }
-                .allowsHitTesting(false)
             }
             .overlayPreferenceValue(OpenTabIconAnchorKey.self) { anchors in
                 GeometryReader { geometry in
@@ -127,18 +177,51 @@ struct TabList: View {
         .scrollDisabled(isRefreshing)
     }
 
+    private func resolveStickyRow(
+        rowAnchors: [TabItem.ID: Anchor<CGRect>],
+        proxy: GeometryProxy
+    ) -> StickyRowState? {
+        guard !isRefreshing,
+              let selectedID,
+              let item = items.first(where: { $0.id == selectedID }),
+              let anchor = rowAnchors[selectedID] else {
+            return nil
+        }
+        let rect = proxy[anchor]
+        if rect.minY < Self.topPinPadding - 0.5 {
+            return StickyRowState(item: item, edge: .top, width: rect.width, height: rect.height)
+        }
+        if rect.maxY > proxy.size.height - Self.bottomPinPadding + 0.5 {
+            return StickyRowState(item: item, edge: .bottom, width: rect.width, height: rect.height)
+        }
+        return nil
+    }
+
     private func resolveHoveredID(
         rowAnchors: [TabItem.ID: Anchor<CGRect>],
+        stickyRow: StickyRowState?,
         proxy: GeometryProxy
     ) -> TabItem.ID? {
         guard !isRefreshing else { return nil }
         if hoveredID != nil, let point = pointerLocation {
-            let topInset = proxy.safeAreaInsets.top
-            guard point.y >= topInset else { return hoveredID }
+            if let stickyRow {
+                let pinnedY = stickyRow.edge == .top
+                    ? Self.topPinPadding
+                    : proxy.size.height - Self.bottomPinPadding - stickyRow.height
+                let pinnedRect = CGRect(
+                    x: Self.horizontalPadding,
+                    y: pinnedY,
+                    width: stickyRow.width,
+                    height: stickyRow.height
+                )
+                if pinnedRect.contains(point) {
+                    return stickyRow.item.id
+                }
+            }
             for item in items {
                 guard let anchor = rowAnchors[item.id] else { continue }
                 let rect = proxy[anchor].insetBy(dx: 0, dy: -3)
-                guard rect.maxY > topInset else { continue }
+                guard rect.maxY > 0 else { continue }
                 if rect.contains(point) {
                     return item.id
                 }
@@ -170,6 +253,7 @@ private struct TabRow: View {
     let item: TabItem
     let isSelected: Bool
     let isHovered: Bool
+    let isPinned: Bool
     let onSelect: () -> Void
     @Environment(\.colorSchemeContrast) private var contrast
 
@@ -215,12 +299,39 @@ private struct TabRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .background {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(Color.primary.opacity((isHovered || isSelected) ? (contrast == .increased ? 0.18 : 0.06) : 0))
+                if isPinned {
+                    StickyRowGlassSurface(contrast: contrast)
+                } else {
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.primary.opacity((isHovered || isSelected) ? (contrast == .increased ? 0.18 : 0.06) : 0))
+                }
             }
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityLabel(item.title + ", " + item.subtitle)
+    }
+}
+
+private struct StickyRowGlassSurface: View {
+    let contrast: ColorSchemeContrast
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
+    var body: some View {
+        if reduceTransparency {
+            shape
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .overlay {
+                    shape.strokeBorder(Color.primary.opacity(contrast == .increased ? 0.4 : 0.22), lineWidth: 1)
+                }
+        } else {
+            Color.clear
+                .glassEffect(.regular, in: shape)
+                .overlay {
+                    shape.strokeBorder(Color.white.opacity(contrast == .increased ? 0.35 : 0.20), lineWidth: 0.75)
+                }
+        }
     }
 }
