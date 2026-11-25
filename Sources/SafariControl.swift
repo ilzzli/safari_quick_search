@@ -1,7 +1,7 @@
 import AppKit
 
 @MainActor
-final class SafariControl {
+final class SafariControl: SafariTabGroupSwitcherInterface {
     var isFocused: Bool {
         NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.Safari"
     }

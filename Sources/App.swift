@@ -9,10 +9,14 @@ private final class AppPanel: NSPanel {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let actions = AppActions()
     private let swipeMonitor: any SwipeMonitorInterface = SystemSwipeEventMonitor()
+    private let safariTabGroupSwitcher: any SafariTabGroupSwitcherInterface = ShortcutTabGroupSwitcher(
+        fallback: SafariControl()
+    )
     private lazy var hotkeys = HotkeyRegistration(
         actions: HotkeysActionsProvider(togglePanelAction: { [weak self] in
             self?.actions.togglePanel()
         }),
+        safari: safariTabGroupSwitcher,
         swipeMonitor: swipeMonitor
     )
     private let tabSupplier: any TabSupplierInterface = TabSupplier(actions: TabActions())

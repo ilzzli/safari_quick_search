@@ -4,7 +4,7 @@ import Carbon
 @MainActor
 final class HotkeyRegistration: NSObject {
     private let actions: any HotkeysActionsInterface
-    private let safari = SafariControl()
+    private let safari: any SafariTabGroupSwitcherInterface
     private let swipeMonitor: any SwipeMonitorInterface
     private var hotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
@@ -14,9 +14,11 @@ final class HotkeyRegistration: NSObject {
 
     init(
         actions: any HotkeysActionsInterface,
+        safari: any SafariTabGroupSwitcherInterface,
         swipeMonitor: any SwipeMonitorInterface
     ) {
         self.actions = actions
+        self.safari = safari
         self.swipeMonitor = swipeMonitor
         super.init()
     }
