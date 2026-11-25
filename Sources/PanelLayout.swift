@@ -55,6 +55,17 @@ struct PanelLayout: View {
                 guard !Task.isCancelled else { return }
             }
         }
+        .task {
+            let switches = NotificationCenter.default.notifications(
+                named: .safariTabGroupDidSwitch
+            ).map { _ in true }
+            for await _ in switches {
+                guard !Task.isCancelled else { return }
+                guard actions.isPanelVisible else { continue }
+                hoveredTab = nil
+                snapshotID = UUID()
+            }
+        }
     }
 
     private var searchBubble: some View {

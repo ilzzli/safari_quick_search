@@ -7,6 +7,10 @@ final class AppActions: AppActionsInterface {
     private weak var panel: NSPanel?
     private let outsideClickMonitor = OutsideClickMonitor()
 
+    var isPanelVisible: Bool {
+        panel?.isVisible == true
+    }
+
     func attachPanel(_ panel: NSPanel) {
         self.panel = panel
     }

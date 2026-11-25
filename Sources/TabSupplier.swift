@@ -19,7 +19,7 @@ actor TabSupplier: TabSupplierInterface {
 
     func tabs(matching input: String, snapshotID: UUID) async throws -> [TabItem] {
         activeTicket?.cancel()
-        if !input.isEmpty {
+        if !input.isEmpty && openSnapshotID == snapshotID {
             try await Task.sleep(for: .milliseconds(250))
         }
         let openTabs = try await loadedOpenTabs(snapshotID: snapshotID)

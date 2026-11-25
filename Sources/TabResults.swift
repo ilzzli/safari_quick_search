@@ -20,6 +20,7 @@ struct TabResults: View {
     @State private var isRefreshing = true
     @State private var errorMessage: String?
     @State private var showAllWindowsInPopup = false
+    @State private var lastLoadedSnapshotID: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -77,13 +78,17 @@ struct TabResults: View {
             selectedID = nil
             isRefreshing = true
             errorMessage = nil
+            let isSameSnapshot = lastLoadedSnapshotID == snapshotID
             do {
-                let cached = try await supplier.cachedTabs(matching: input, snapshotID: snapshotID)
-                try Task.checkCancellation()
-                items = cached
+                if isSameSnapshot {
+                    let cached = try await supplier.cachedTabs(matching: input, snapshotID: snapshotID)
+                    try Task.checkCancellation()
+                    items = cached
+                }
                 let loaded = try await supplier.tabs(matching: input, snapshotID: snapshotID)
                 try Task.checkCancellation()
                 items = loaded
+                lastLoadedSnapshotID = snapshotID
                 if !items.contains(where: { $0.id == selectedID }) { selectedID = nil }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -156,8 +161,13 @@ private struct ResultKeyboardHandler: NSViewRepresentable {
                     self.onOptionTab?()
                     return nil
                 }
-                guard flags.intersection([.command, .option, .control]).isEmpty,
-                      (!flags.contains(.shift) || event.keyCode == UInt16(kVK_Tab)) else { return event }
+                let isReturnKey = event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_KeypadEnter)
+                let allowedWithCommand = isReturnKey && flags == [.command]
+                guard allowedWithCommand
+                    || (flags.intersection([.command, .option, .control]).isEmpty
+                        && (!flags.contains(.shift) || event.keyCode == UInt16(kVK_Tab))) else {
+                    return event
+                }
                 if let editor = window.firstResponder as? NSTextView, editor.hasMarkedText() {
                     return event
                 }

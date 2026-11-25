@@ -25,7 +25,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }),
         swipeHandler: swipeHandler
     )
-    private let tabSupplier: any TabSupplierInterface = TabSupplier(actions: TabActions())
+    private lazy var tabActions: any TabActionInterface = SafariTabActions(onComplete: { [weak self] in
+        self?.actions.hidePanel()
+    })
+    // Swap to `TabActions()` to restore the debug inspection alert implementation.
+    private lazy var tabSupplier: any TabSupplierInterface = TabSupplier(actions: tabActions)
     private let tabGroups: any TabGroupsInterface = SafariTabGroups()
     private var panel: NSPanel?
 

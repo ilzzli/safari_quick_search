@@ -159,6 +159,7 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
     private let dbPath: String
     private let bridge = ShortcutsBridge()
     private var optimisticSwitch: OptimisticSwitch?
+    private var switchNotificationTask: Task<Void, Never>?
 
     init(
         shortcutName: String = "Open Safari Tab Group 3",
@@ -214,6 +215,9 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
             return
         }
 
+        switchNotificationTask?.cancel()
+        switchNotificationTask = nil
+
         let now = ProcessInfo.processInfo.systemUptime
         let name = shortcutName
 
@@ -229,12 +233,88 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
                         targetGroupID: target.id,
                         timestamp: now
                     )
+                    self.scheduleTabGroupSwitchNotification(
+                        windowID: windowID,
+                        previousDBGroupID: previousDBGroupID,
+                        targetGroupID: target.id
+                    )
                 } else {
                     SwipeLogger.debug("Shortcut '\(name)' unavailable; falling back to menu switcher")
                     self.invokeFallback(offset: fallbackOffset)
                 }
             }
         }
+    }
+
+    private enum ActiveGroupQueryResult: Sendable {
+        case value(Int64?)
+        case unreadable
+    }
+
+    private func scheduleTabGroupSwitchNotification(
+        windowID: Int64,
+        previousDBGroupID: Int64?,
+        targetGroupID: Int64
+    ) {
+        switchNotificationTask?.cancel()
+        let path = dbPath
+        switchNotificationTask = Task { @MainActor [weak self] in
+            var confirmed = false
+            if previousDBGroupID == targetGroupID {
+                try? await Task.sleep(for: .milliseconds(450))
+            } else {
+                pollLoop: for _ in 0..<25 {
+                    try? await Task.sleep(for: .milliseconds(100))
+                    guard !Task.isCancelled else { return }
+                    let result = await Task.detached(priority: .userInitiated) {
+                        Self.readActiveGroupID(dbPath: path, windowID: windowID)
+                    }.value
+                    guard !Task.isCancelled else { return }
+                    switch result {
+                    case .unreadable:
+                        try? await Task.sleep(for: .milliseconds(350))
+                        break pollLoop
+                    case .value(let current):
+                        if current == targetGroupID {
+                            confirmed = true
+                            try? await Task.sleep(for: .milliseconds(120))
+                            break pollLoop
+                        }
+                    }
+                }
+            }
+            guard !Task.isCancelled, let self else { return }
+            SwipeLogger.debug("Posting tab group switch refresh (confirmed=\(confirmed))")
+            NotificationCenter.default.post(name: .safariTabGroupDidSwitch, object: self)
+        }
+    }
+
+    nonisolated private static func readActiveGroupID(dbPath: String, windowID: Int64) -> ActiveGroupQueryResult {
+        var connection: OpaquePointer?
+        let status = sqlite3_open_v2(dbPath, &connection, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
+        guard status == SQLITE_OK, let db = connection else {
+            if let connection { sqlite3_close(connection) }
+            return .unreadable
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 100)
+
+        let sql = "SELECT active_tab_group_id FROM windows WHERE id = ? AND date_closed IS NULL LIMIT 1"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+            return .unreadable
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, windowID)
+
+        let step = sqlite3_step(stmt)
+        if step == SQLITE_ROW {
+            if sqlite3_column_type(stmt, 0) == SQLITE_NULL {
+                return .value(nil)
+            }
+            return .value(sqlite3_column_int64(stmt, 0))
+        }
+        return step == SQLITE_DONE ? .value(nil) : .unreadable
     }
 
     private func switchTabGroup(offset: Int) {
