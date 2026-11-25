@@ -2,23 +2,27 @@ import AppKit
 import Carbon
 import SQLite3
 
+struct SafariTabGroupOption: Identifiable, Equatable, Sendable {
+    let id: Int64
+    let title: String
+}
+
+struct SafariActiveWindowTabGroups: Equatable, Sendable {
+    let windowID: Int64
+    let groups: [SafariTabGroupOption]
+    /// Index into `groups` of the currently active tab group, or `nil` when on the default "no-group" local group.
+    let activeIndex: Int?
+    let activeGroupID: Int64?
+    let localGroupID: Int64?
+    /// Safari's frontmost window frame in AppKit screen coordinates (bottom-left origin), if available.
+    let windowFrame: NSRect?
+}
+
 /// Switches Safari tab groups by invoking a macOS Shortcuts app shortcut (e.g. "Open Safari Tab Group 3")
-/// with the next/previous named tab group of Safari's frontmost window.
+/// with the target named tab group of Safari's frontmost window.
 /// Falls back to `fallback` (menu-based switcher) when the shortcut is not registered or tab groups cannot be resolved.
 @MainActor
 final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
-    private struct TabGroupEntry: Sendable {
-        let id: Int64
-        let title: String
-    }
-
-    private struct WindowGroupSnapshot: Sendable {
-        let windowID: Int64
-        let activeGroupID: Int64?
-        let localGroupID: Int64?
-        let groups: [TabGroupEntry]
-    }
-
     private struct OptimisticSwitch {
         let windowID: Int64
         let previousDBGroupID: Int64?
@@ -99,7 +103,6 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
         private func checkRegisteredLocked(shortcutName: String, force: Bool) -> Bool {
             let now = ProcessInfo.processInfo.systemUptime
             if !force, let cached = cachedRegistered {
-                // Re-verify occasionally (more frequently if previously missing so newly added shortcuts work promptly).
                 let ttl: TimeInterval = cached ? 30.0 : 5.0
                 if now - lastCheckTime < ttl {
                     return cached
@@ -156,7 +159,6 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
     private let dbPath: String
     private let bridge = ShortcutsBridge()
     private var optimisticSwitch: OptimisticSwitch?
-    private var didLogBookmarksSchema = false
 
     init(
         shortcutName: String = "Open Safari Tab Group 3",
@@ -181,71 +183,100 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
         switchTabGroup(offset: 1)
     }
 
-    private func switchTabGroup(offset: Int) {
+    func activeWindowTabGroups() -> SafariActiveWindowTabGroups? {
+        guard let raw = readFrontWindowGroups() else { return nil }
+        let effectiveActiveID = resolvedActiveGroupID(for: raw.windowID, dbActiveGroupID: raw.activeGroupID)
+        let isDefaultNoGroup = effectiveActiveID == nil || effectiveActiveID == raw.localGroupID
+        let activeIndex: Int?
+        if !isDefaultNoGroup, let activeID = effectiveActiveID {
+            activeIndex = raw.groups.firstIndex(where: { $0.id == activeID })
+        } else {
+            activeIndex = nil
+        }
+        return SafariActiveWindowTabGroups(
+            windowID: raw.windowID,
+            groups: raw.groups,
+            activeIndex: activeIndex,
+            activeGroupID: raw.activeGroupID,
+            localGroupID: raw.localGroupID,
+            windowFrame: raw.windowFrame
+        )
+    }
+
+    func openTabGroup(
+        _ target: SafariTabGroupOption,
+        inWindow windowID: Int64,
+        previousDBGroupID: Int64?,
+        fallbackOffset: Int
+    ) {
         guard isFocused else {
             SwipeLogger.debug("Skipped tab group switch: Safari lost focus")
             return
         }
 
-        guard let snapshot = readFrontWindowGroups(), !snapshot.groups.isEmpty else {
-            SwipeLogger.debug("Could not resolve frontmost Safari window tab groups; falling back to menu switcher")
-            invokeFallback(offset: offset)
-            return
-        }
-
-        let effectiveActiveID = resolvedActiveGroupID(for: snapshot)
-        let isDefaultNoGroup = effectiveActiveID == nil || effectiveActiveID == snapshot.localGroupID
-        let count = snapshot.groups.count
-        let targetIndex: Int
-
-        if !isDefaultNoGroup,
-           let activeID = effectiveActiveID,
-           let currentIndex = snapshot.groups.firstIndex(where: { $0.id == activeID }) {
-            targetIndex = ((currentIndex + offset) % count + count) % count
-        } else {
-            // Currently on default "no-group" (local) group:
-            // next (left swipe) goes to first group; previous (right swipe) goes to last group.
-            targetIndex = offset > 0 ? 0 : count - 1
-        }
-
-        let target = snapshot.groups[targetIndex]
-        let previousDBGroupID = snapshot.activeGroupID
         let now = ProcessInfo.processInfo.systemUptime
         let name = shortcutName
 
-        SwipeLogger.debug(
-            "Win=\(snapshot.windowID) active=\(effectiveActiveID.map(String.init) ?? "nil") local=\(snapshot.localGroupID.map(String.init) ?? "nil") groups=[\(snapshot.groups.map(\.title).joined(separator: ", "))] -> '\(target.title)' (index \(targetIndex)/\(count))"
-        )
+        SwipeLogger.debug("Opening Safari tab group '\(target.title)' via shortcut '\(name)'")
 
         bridge.runIfRegistered(shortcutName: name, groupName: target.title) { [weak self] ran in
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 if ran {
                     self.optimisticSwitch = OptimisticSwitch(
-                        windowID: snapshot.windowID,
+                        windowID: windowID,
                         previousDBGroupID: previousDBGroupID,
                         targetGroupID: target.id,
                         timestamp: now
                     )
                 } else {
                     SwipeLogger.debug("Shortcut '\(name)' unavailable; falling back to menu switcher")
-                    self.invokeFallback(offset: offset)
+                    self.invokeFallback(offset: fallbackOffset)
                 }
             }
         }
     }
 
-    private func resolvedActiveGroupID(for snapshot: WindowGroupSnapshot) -> Int64? {
+    private func switchTabGroup(offset: Int) {
+        guard isFocused else {
+            SwipeLogger.debug("Skipped tab group switch: Safari lost focus")
+            return
+        }
+
+        guard let snapshot = activeWindowTabGroups(), !snapshot.groups.isEmpty else {
+            SwipeLogger.debug("Could not resolve frontmost Safari window tab groups; falling back to menu switcher")
+            invokeFallback(offset: offset)
+            return
+        }
+
+        let count = snapshot.groups.count
+        let targetIndex: Int
+        if let currentIndex = snapshot.activeIndex {
+            targetIndex = ((currentIndex + offset) % count + count) % count
+        } else {
+            targetIndex = offset > 0 ? 0 : count - 1
+        }
+
+        let target = snapshot.groups[targetIndex]
+        openTabGroup(
+            target,
+            inWindow: snapshot.windowID,
+            previousDBGroupID: snapshot.activeGroupID,
+            fallbackOffset: offset
+        )
+    }
+
+    private func resolvedActiveGroupID(for windowID: Int64, dbActiveGroupID: Int64?) -> Int64? {
         if let optimistic = optimisticSwitch {
             let age = ProcessInfo.processInfo.systemUptime - optimistic.timestamp
-            if optimistic.windowID == snapshot.windowID,
+            if optimistic.windowID == windowID,
                age < 2.0,
-               snapshot.activeGroupID == optimistic.previousDBGroupID {
+               dbActiveGroupID == optimistic.previousDBGroupID {
                 return optimistic.targetGroupID
             }
             optimisticSwitch = nil
         }
-        return snapshot.activeGroupID
+        return dbActiveGroupID
     }
 
     private func invokeFallback(offset: Int) {
@@ -256,7 +287,15 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
         }
     }
 
-    private func readFrontWindowGroups() -> WindowGroupSnapshot? {
+    private struct RawWindowGroups {
+        let windowID: Int64
+        let activeGroupID: Int64?
+        let localGroupID: Int64?
+        let groups: [SafariTabGroupOption]
+        let windowFrame: NSRect?
+    }
+
+    private func readFrontWindowGroups() -> RawWindowGroups? {
         var connection: OpaquePointer?
         let status = sqlite3_open_v2(dbPath, &connection, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil)
         guard status == SQLITE_OK, let db = connection else {
@@ -266,13 +305,6 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 250)
-
-        #if SQS_Debug
-        if !didLogBookmarksSchema {
-            didLogBookmarksSchema = true
-            Self.logBookmarksOrderingColumns(db: db)
-        }
-        #endif
 
         struct OpenWindowRow {
             let id: Int64
@@ -315,9 +347,10 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
         }
         guard !openWindows.isEmpty else { return nil }
 
+        let frontWindowInfo = Self.frontmostSafariWindowInfo()
         let matchedWindow: OpenWindowRow
-        if let frontWindowNumber = Self.frontmostSafariWindowNumber(),
-           let found = openWindows.first(where: { $0.restoredWindowIDs.contains(frontWindowNumber) }) {
+        if let frontNumber = frontWindowInfo?.number,
+           let found = openWindows.first(where: { $0.restoredWindowIDs.contains(frontNumber) }) {
             matchedWindow = found
         } else if openWindows.count == 1 {
             matchedWindow = openWindows[0]
@@ -325,8 +358,8 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
             return nil
         }
 
-        // DefaultProfile's named tab groups are stored directly under Root (id = 0, parent IS NULL),
-        // whereas custom profiles store their named tab groups under parent = active_profile_id.
+        // DefaultProfile's named tab groups live under Root (id = 0, parent IS NULL);
+        // custom profiles store their named tab groups under parent = active_profile_id.
         let containerParentID: Int64
         if let profileID = matchedWindow.activeProfileID,
            matchedWindow.activeProfileExternalUUID != "DefaultProfile" {
@@ -371,20 +404,21 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
         sqlite3_bind_int64(grpStmt, 1, containerParentID)
         sqlite3_bind_int64(grpStmt, 2, matchedWindow.localGroupID ?? -1)
 
-        var groups: [TabGroupEntry] = []
+        var groups: [SafariTabGroupOption] = []
         while sqlite3_step(grpStmt) == SQLITE_ROW {
             let groupID = sqlite3_column_int64(grpStmt, 0)
             guard let rawTitle = sqlite3_column_text(grpStmt, 1) else { continue }
             let title = String(cString: rawTitle)
             guard !SafariTabGroup.isBaseTitle(title) else { continue }
-            groups.append(TabGroupEntry(id: groupID, title: title))
+            groups.append(SafariTabGroupOption(id: groupID, title: title))
         }
 
-        return WindowGroupSnapshot(
+        return RawWindowGroups(
             windowID: matchedWindow.id,
             activeGroupID: matchedWindow.activeGroupID,
             localGroupID: matchedWindow.localGroupID,
-            groups: groups
+            groups: groups,
+            windowFrame: frontWindowInfo?.cocoaFrame
         )
     }
 
@@ -398,24 +432,7 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
         return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int64(stmt, 0) : 0
     }
 
-    #if SQS_Debug
-    private static func logBookmarksOrderingColumns(db: OpaquePointer) {
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "PRAGMA table_info(bookmarks)", -1, &stmt, nil) == SQLITE_OK, let stmt else {
-            return
-        }
-        defer { sqlite3_finalize(stmt) }
-        var cols: [String] = []
-        while sqlite3_step(stmt) == SQLITE_ROW {
-            if let name = sqlite3_column_text(stmt, 1) {
-                cols.append(String(cString: name))
-            }
-        }
-        SwipeLogger.debug("bookmarks columns: \(cols.joined(separator: ", "))")
-    }
-    #endif
-
-    private static func frontmostSafariWindowNumber() -> String? {
+    private static func frontmostSafariWindowInfo() -> (number: String, cocoaFrame: NSRect)? {
         guard let safari = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first else {
             return nil
         }
@@ -423,16 +440,21 @@ final class ShortcutTabGroupSwitcher: SafariTabGroupSwitcherInterface {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return nil
         }
+        let primaryScreenHeight = NSScreen.screens.first?.frame.height ?? 0
         for info in list {
             guard (info[kCGWindowOwnerPID as String] as? pid_t) == pid,
                   (info[kCGWindowLayer as String] as? Int) == 0,
                   let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                  let x = bounds["X"] as? Double,
+                  let y = bounds["Y"] as? Double,
                   let width = bounds["Width"] as? Double, width > 100,
                   let height = bounds["Height"] as? Double, height > 100,
                   let number = info[kCGWindowNumber as String] as? Int else {
                 continue
             }
-            return String(number)
+            let cocoaY = primaryScreenHeight - y - height
+            let cocoaFrame = NSRect(x: x, y: cocoaY, width: width, height: height)
+            return (String(number), cocoaFrame)
         }
         return nil
     }

@@ -8,16 +8,20 @@ private final class AppPanel: NSPanel {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let actions = AppActions()
-    private let swipeMonitor: any SwipeMonitorInterface = SystemSwipeEventMonitor()
-    private let safariTabGroupSwitcher: any SafariTabGroupSwitcherInterface = ShortcutTabGroupSwitcher(
+    private let shortcutTabGroupSwitcher = ShortcutTabGroupSwitcher(
         fallback: SafariControl()
     )
+    private lazy var swipeHandler: any SafariSwipeHandlerInterface = BubbleSafariSwipeHandler(
+        scrubMonitor: SystemSwipeScrubMonitor(),
+        shortcutSwitcher: shortcutTabGroupSwitcher
+    )
+    // Swap to `DiscreteSafariSwipeHandler(swipeMonitor: SystemSwipeOnReleaseMonitor(), switcher: shortcutTabGroupSwitcher)`
+    // (or `SystemSwipeEventMonitor()` / `ThreeFingerSwipeMonitor()` / `SafariControl()`) to switch approaches in one place.
     private lazy var hotkeys = HotkeyRegistration(
         actions: HotkeysActionsProvider(togglePanelAction: { [weak self] in
             self?.actions.togglePanel()
         }),
-        safari: safariTabGroupSwitcher,
-        swipeMonitor: swipeMonitor
+        swipeHandler: swipeHandler
     )
     private let tabSupplier: any TabSupplierInterface = TabSupplier(actions: TabActions())
     private let tabGroups: any TabGroupsInterface = SafariTabGroups()

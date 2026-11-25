@@ -4,8 +4,7 @@ import Carbon
 @MainActor
 final class HotkeyRegistration: NSObject {
     private let actions: any HotkeysActionsInterface
-    private let safari: any SafariTabGroupSwitcherInterface
-    private let swipeMonitor: any SwipeMonitorInterface
+    private let swipeHandler: any SafariSwipeHandlerInterface
     private var hotkey: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private weak var trackingMenu: NSMenu?
@@ -14,12 +13,10 @@ final class HotkeyRegistration: NSObject {
 
     init(
         actions: any HotkeysActionsInterface,
-        safari: any SafariTabGroupSwitcherInterface,
-        swipeMonitor: any SwipeMonitorInterface
+        swipeHandler: any SafariSwipeHandlerInterface
     ) {
         self.actions = actions
-        self.safari = safari
-        self.swipeMonitor = swipeMonitor
+        self.swipeHandler = swipeHandler
         super.init()
     }
 
@@ -81,23 +78,17 @@ final class HotkeyRegistration: NSObject {
     }
 
     @objc private func updateSwipeTracking() {
-        swipeMonitor.stop()
-        guard safari.isFocused else {
+        swipeHandler.stop()
+        guard swipeHandler.isSafariFocused else {
             SwipeLogger.debug("Tracking disabled: Safari is not focused")
             return
         }
         SwipeLogger.debug("Safari focused: enabling tracking")
-        swipeMonitor.start { [weak self] direction in
-            guard let self, self.safari.isFocused else { return }
-            switch direction {
-            case .left: self.safari.nextTabGroup()
-            case .right: self.safari.previousTabGroup()
-            }
-        }
+        swipeHandler.start()
     }
 
     @objc private func stopSwipeTracking() {
-        swipeMonitor.stop()
+        swipeHandler.stop()
     }
 
     private func registerGlobalHotkey() {
@@ -121,7 +112,7 @@ final class HotkeyRegistration: NSObject {
 
     func stop() {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
-        swipeMonitor.stop()
+        swipeHandler.stop()
         NotificationCenter.default.removeObserver(self)
         trackingMenu = nil
         stopMenuKeyMonitor()
