@@ -31,11 +31,18 @@ struct OpenTabProfilesPopupOverlay: View {
     let allProfiles: [SafariProfileGroups]
     let showAllWindows: Bool
     let isPointerHovered: Bool
+    let isPointerInsidePinnedRow: Bool
     let isScrolling: Bool
     let anchors: [TabItem.ID: Anchor<CGRect>]
+    let rowAnchors: [TabItem.ID: Anchor<CGRect>]
+    let pinnedRowID: TabItem.ID?
     let proxy: GeometryProxy
 
-    private static let boundaryPadding: CGFloat = 10
+    private static let topViewportPadding: CGFloat = 4
+    private static let bottomViewportPadding: CGFloat = 12
+    private static let rowVerticalGap: CGFloat = 5
+    private static let rowTrailingGap: CGFloat = 6.5
+    private static let rowBorderCompensation: CGFloat = 0.75
 
     @State private var displayedItem: TabItem?
     @State private var appearProgress: CGFloat = 0
@@ -114,10 +121,14 @@ struct OpenTabProfilesPopupOverlay: View {
     /// Synchronously resolves the active opened-tab item on the exact frame the scroll offset changes,
     /// using the live pointer location to hit-test the row under the cursor before `.onHover` catches up.
     private var resolvedActiveItem: TabItem? {
+        if isPointerInsidePinnedRow {
+            return activeItem
+        }
         if isPointerHovered, let point = pointerLocation {
             var closestOpenedItem: TabItem?
             var closestDistance = CGFloat.greatestFiniteMagnitude
             for item in items where item.type == .OPENED_TAB {
+                guard item.id != pinnedRowID else { continue }
                 guard let anchor = anchors[item.id] else { continue }
                 let rect = proxy[anchor]
                 guard rect.maxY > 0 else { continue }
@@ -145,28 +156,42 @@ struct OpenTabProfilesPopupOverlay: View {
         ZStack(alignment: .bottomTrailing) {
             if let item = currentItem, let anchor = anchors[item.id] {
                 let iconRect = proxy[anchor]
-                let targetSize = measuredSizes[item.id]
-                let popupHeight = targetSize?.height ?? 44
-                let halfHeight = popupHeight / 2
-                let minCenterY = halfHeight + Self.boundaryPadding
-                let maxCenterY = max(proxy.size.height - halfHeight - Self.boundaryPadding, minCenterY)
-                let clampedCenterY = min(max(iconRect.midY, minCenterY), maxCenterY)
+                let rowRect = rowAnchors[item.id].map { proxy[$0] }
+                let rowHeight = rowRect?.height ?? 46
+                let verticalInset = Self.rowVerticalGap + Self.rowBorderCompensation
+                let trailingInset = Self.rowTrailingGap + Self.rowBorderCompensation
+                let targetHeight = max(rowHeight - verticalInset * 2, 28)
+                let targetWidth = measuredSizes[item.id]?.width
+                let halfHeight = targetHeight / 2
+                let targetCenterY: CGFloat = {
+                    if pinnedRowID == item.id, let rowRect {
+                        return rowRect.midY
+                    }
+                    let rawCenterY = rowRect?.midY ?? iconRect.midY
+                    let minCenterY = halfHeight + Self.topViewportPadding + verticalInset
+                    let maxCenterY = max(
+                        proxy.size.height - Self.bottomViewportPadding - verticalInset - halfHeight,
+                        minCenterY
+                    )
+                    return min(max(rawCenterY, minCenterY), maxCenterY)
+                }()
+                let targetRightX = (rowRect?.maxX ?? (iconRect.maxX + 12)) - trailingInset
 
                 popupInnerContent(for: item)
                     .accessibilityHidden(appearProgress == 0)
                     .modifier(
                         AnimatablePopupLayoutModifier(
-                            width: targetSize?.width,
-                            height: targetSize?.height,
-                            rightX: iconRect.maxX,
-                            centerY: clampedCenterY,
+                            width: targetWidth,
+                            height: targetHeight,
+                            rightX: targetRightX,
+                            centerY: targetCenterY,
                             appearProgress: appearProgress,
                             reduceTransparency: reduceTransparency
                         )
                     )
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.24).delay(0.035), value: liveItem?.id)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: glideGeneration)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.20), value: clampedCenterY)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.20), value: targetCenterY)
             }
         }
         .frame(width: proxy.size.width, height: proxy.size.height)
@@ -245,27 +270,38 @@ struct OpenTabProfilesPopupOverlay: View {
                     .foregroundStyle(.secondary)
             }
             ForEach(Array(itemProfiles.enumerated()), id: \.offset) { _, profile in
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 2.5) {
                     Text(profile.name)
-                        .font(.caption.weight(.semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(profile.hasMatch ? .primary : .secondary)
                     if showAllWindows {
                         HStack(spacing: 4) {
                             ForEach(Array(profile.groups.enumerated()), id: \.offset) { _, group in
                                 Text(group.title)
-                                    .font(.caption2.weight(group.isHighlighted ? .semibold : .regular))
-                                    .foregroundStyle(group.isHighlighted ? .primary : .secondary)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 2)
+                                    .font(.system(size: 10, weight: group.isHighlighted ? .semibold : .medium))
+                                    .foregroundStyle(group.isHighlighted ? Color.accentColor : .secondary)
+                                    .padding(.horizontal, 6.5)
+                                    .padding(.vertical, 1.5)
                                     .background(
-                                        group.isHighlighted ? Color.yellow.opacity(0.22) : Color.secondary.opacity(0.08),
+                                        group.isHighlighted
+                                            ? Color.accentColor.opacity(0.16)
+                                            : Color.primary.opacity(0.06),
                                         in: Capsule()
                                     )
+                                    .overlay {
+                                        Capsule()
+                                            .strokeBorder(
+                                                group.isHighlighted
+                                                    ? Color.accentColor.opacity(0.32)
+                                                    : Color.primary.opacity(0.08),
+                                                lineWidth: 0.5
+                                            )
+                                    }
                             }
                         }
                     } else {
                         Text(profile.groups.map(\.title).joined(separator: " · "))
-                            .font(.caption2)
+                            .font(.system(size: 10.5))
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -273,8 +309,8 @@ struct OpenTabProfilesPopupOverlay: View {
                 .fixedSize()
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 4)
         .fixedSize()
     }
 }
@@ -287,6 +323,8 @@ struct AnimatablePopupLayoutModifier: ViewModifier, Animatable {
     var appearProgress: CGFloat
     let hasMeasuredSize: Bool
     let reduceTransparency: Bool
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
 
     init(
         width: CGFloat?,
@@ -338,9 +376,12 @@ struct AnimatablePopupLayoutModifier: ViewModifier, Animatable {
 
     func body(content: Content) -> some View {
         let clampedProgress = min(max(appearProgress, 0), 1)
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: 8, style: .continuous)
         let currentWidth = max(width * clampedProgress, 0)
         let currentHeight = max(height * (0.65 + 0.35 * clampedProgress), 0)
+        let rimColor = colorScheme == .dark
+            ? Color.white.opacity(contrast == .increased ? 0.28 : 0.16)
+            : Color.black.opacity(contrast == .increased ? 0.20 : 0.08)
 
         Group {
             if clampedProgress > 0.01 {
@@ -351,7 +392,7 @@ struct AnimatablePopupLayoutModifier: ViewModifier, Animatable {
                     if hasMeasuredSize {
                         content
                             .opacity(clampedProgress)
-                            .frame(width: w, height: h, alignment: .leading)
+                            .frame(width: w, height: h, alignment: .center)
                             .clipped()
                             .clipShape(shape)
                     } else {
@@ -364,13 +405,16 @@ struct AnimatablePopupLayoutModifier: ViewModifier, Animatable {
                 let styled = Group {
                     if reduceTransparency {
                         framed
-                            .background(Color(nsColor: .windowBackgroundColor), in: shape)
+                            .background(Color(nsColor: .controlBackgroundColor), in: shape)
                             .overlay {
-                                shape.strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                                shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
                             }
                     } else {
                         framed
                             .glassEffect(.regular, in: shape)
+                            .overlay {
+                                shape.strokeBorder(rimColor, lineWidth: 0.75)
+                            }
                     }
                 }
 

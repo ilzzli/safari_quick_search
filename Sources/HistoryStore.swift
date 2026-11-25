@@ -64,6 +64,11 @@ struct HistoryStore {
                     sqlite3_result_int(context, 0)
                     return
                 }
+                // Fast ASCII substring gate: skip URLComponents allocation for ~99% of non-Google URLs.
+                guard HistoryStore.containsGoogleASCII(text) else {
+                    sqlite3_result_int(context, 0)
+                    return
+                }
                 sqlite3_result_int(context, HistoryStore.isGoogleSearchURL(String(cString: text)) ? 1 : 0)
             }, nil, nil, nil)
         guard registered == SQLITE_OK else { throw HistoryError.query(registered) }
@@ -133,6 +138,25 @@ struct HistoryStore {
                                      title: String(cString: titleText), url: String(cString: urlText)))
         }
         return rows
+    }
+
+    // Fast case-insensitive C-string check for "google." before allocating Swift String / URLComponents.
+    nonisolated static func containsGoogleASCII(_ cString: UnsafePointer<UInt8>) -> Bool {
+        var p = cString
+        while p.pointee != 0 {
+            let b0 = p.pointee | 0x20
+            if b0 == 0x67, // 'g'
+               (p[1] | 0x20) == 0x6f, // 'o'
+               (p[2] | 0x20) == 0x6f, // 'o'
+               (p[3] | 0x20) == 0x67, // 'g'
+               (p[4] | 0x20) == 0x6c, // 'l'
+               (p[5] | 0x20) == 0x65, // 'e'
+               p[6] == 0x2e { // '.'
+                return true
+            }
+            p = p.advanced(by: 1)
+        }
+        return false
     }
 
     // Recognize search pages by URL, not their localized page titles. Other

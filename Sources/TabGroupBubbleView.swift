@@ -27,6 +27,8 @@ struct TabGroupBubbleView: View {
     let model: TabGroupBubbleModel
 
     @State private var segmentFrames: [Int: CGRect] = [:]
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -57,7 +59,7 @@ struct TabGroupBubbleView: View {
                 }
 
                 // All tab group segments in a single horizontal multivalue toggle row.
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     ForEach(Array(model.groups.enumerated()), id: \.element.id) { index, group in
                         let isSelected = model.selectedIndex == index
                         let isStartingGroup = model.initialActiveIndex == index
@@ -65,17 +67,17 @@ struct TabGroupBubbleView: View {
                         HStack(spacing: 6) {
                             if isStartingGroup {
                                 Circle()
-                                    .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.6))
-                                    .frame(width: 6, height: 6)
+                                    .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.55))
+                                    .frame(width: 5.5, height: 5.5)
                             }
                             Text(group.title)
-                                .font(.system(size: 13.5, weight: isSelected ? .semibold : .medium, design: .rounded))
+                                .font(.system(size: 13, weight: isSelected ? .semibold : .medium))
                                 .foregroundStyle(isSelected ? .primary : .secondary)
                                 .lineLimit(1)
                                 .fixedSize()
                         }
-                        .padding(.horizontal, 15)
-                        .padding(.vertical, 9)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
                         .contentShape(Capsule())
                         .background {
                             GeometryReader { geo in
@@ -92,8 +94,14 @@ struct TabGroupBubbleView: View {
             .onPreferenceChange(BubbleSegmentFrameKey.self) { frames in
                 segmentFrames = frames
             }
-            .padding(5)
-            .modifier(BubbleTrackGlassSurface(reduceTransparency: reduceTransparency))
+            .padding(4)
+            .modifier(
+                BubbleTrackGlassSurface(
+                    colorScheme: colorScheme,
+                    contrast: contrast,
+                    reduceTransparency: reduceTransparency
+                )
+            )
         }
         .fixedSize()
         .padding(24)
@@ -109,38 +117,46 @@ struct TabGroupBubbleView: View {
     @ViewBuilder
     private var selectionThumb: some View {
         let shape = Capsule()
+        let rimColor = colorScheme == .dark
+            ? Color.white.opacity(contrast == .increased ? 0.36 : 0.24)
+            : Color.accentColor.opacity(contrast == .increased ? 0.45 : 0.28)
         if reduceTransparency {
             shape
-                .fill(Color.accentColor.opacity(0.22))
+                .fill(Color.accentColor.opacity(0.20))
                 .overlay {
                     shape.strokeBorder(Color.accentColor.opacity(0.55), lineWidth: 1)
                 }
         } else {
             Color.clear
-                .glassEffect(.regular.tint(Color.accentColor.opacity(0.20)), in: shape)
+                .glassEffect(.regular.tint(Color.accentColor.opacity(0.18)), in: shape)
                 .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.32), lineWidth: 0.75)
+                    shape.strokeBorder(rimColor, lineWidth: 0.75)
                 }
         }
     }
 }
 
 private struct BubbleTrackGlassSurface: ViewModifier {
+    let colorScheme: ColorScheme
+    let contrast: ColorSchemeContrast
     let reduceTransparency: Bool
 
     func body(content: Content) -> some View {
         let shape = Capsule()
+        let rimColor = colorScheme == .dark
+            ? Color.white.opacity(contrast == .increased ? 0.28 : 0.16)
+            : Color.black.opacity(contrast == .increased ? 0.20 : 0.09)
         if reduceTransparency {
             content
                 .background(Color(nsColor: .windowBackgroundColor), in: shape)
                 .overlay {
-                    shape.strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                    shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
                 }
         } else {
             content
                 .glassEffect(.regular, in: shape)
                 .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75)
+                    shape.strokeBorder(rimColor, lineWidth: 0.75)
                 }
         }
     }

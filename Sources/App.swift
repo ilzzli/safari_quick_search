@@ -11,7 +11,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutTabGroupSwitcher = ShortcutTabGroupSwitcher(
         fallback: SafariControl()
     )
-    private lazy var bubblePresenter: any TabGroupBubblePresenterInterface = TabGroupBubblePanelController()
+    private lazy var bubblePresenter: any TabGroupBubblePresenterInterface = TabGroupBubblePanelController(
+        searchPanelFrameProvider: { [weak self] in
+            self?.actions.panelFrame
+        }
+    )
     private lazy var swipeHandler: any SafariSwipeHandlerInterface = BubbleSafariSwipeHandler(
         scrubMonitor: SystemSwipeScrubMonitor(),
         shortcutSwitcher: shortcutTabGroupSwitcher,

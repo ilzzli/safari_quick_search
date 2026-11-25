@@ -5,6 +5,7 @@ import SQLite3
 final class SafariControl: SafariTabGroupSwitcherInterface {
     private let dbPath: String
     private var switchNotificationTask: Task<Void, Never>?
+    private var compiledScripts: [String: NSAppleScript] = [:]
 
     init(dbPath: String = TabStore.defaultPath) {
         self.dbPath = dbPath
@@ -29,17 +30,29 @@ final class SafariControl: SafariTabGroupSwitcherInterface {
         }
         SwipeLogger.debug("Executing Safari command: " + menuItem)
         let beforeGroups = Self.readActiveGroupIDs(dbPath: dbPath)
-        let source = """
-        tell application "System Events"
-            tell process "Safari"
-                if frontmost then
-                    click menu item "\(menuItem)" of menu "Window" of menu bar 1
-                end if
+        let script: NSAppleScript?
+        if let cached = compiledScripts[menuItem] {
+            script = cached
+        } else {
+            let source = """
+            tell application "System Events"
+                tell process "Safari"
+                    if frontmost then
+                        click menu item "\(menuItem)" of menu "Window" of menu bar 1
+                    end if
+                end tell
             end tell
-        end tell
-        """
+            """
+            let created = NSAppleScript(source: source)
+            var compileError: NSDictionary?
+            created?.compileAndReturnError(&compileError)
+            if compileError == nil, let created {
+                compiledScripts[menuItem] = created
+            }
+            script = created
+        }
         var error: NSDictionary?
-        NSAppleScript(source: source)?.executeAndReturnError(&error)
+        script?.executeAndReturnError(&error)
         if let error {
             SwipeLogger.debug("Safari command failed: " + error.description)
             let alert = NSAlert()

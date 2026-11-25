@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct PanelLayout: View {
-    private static let headerControlHeight: CGFloat = 56
+    private static let headerControlHeight: CGFloat = 52
 
     let actions: any AppActionsInterface
     let tabSupplier: any TabSupplierInterface
@@ -11,6 +11,7 @@ struct PanelLayout: View {
     @State private var hoveredTab: TabItem?
     @State private var snapshotID = UUID()
     @State private var profiles: [SafariProfileGroups] = []
+    @FocusState private var isSearchFieldFocused: Bool
 
     var body: some View {
         TabResults(
@@ -32,9 +33,9 @@ struct PanelLayout: View {
                     }
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .padding(.top, 14)
-            .padding(.bottom, 10)
+            .padding(.bottom, 8)
         }
         .background {
             Button("", action: actions.hidePanel)
@@ -46,6 +47,9 @@ struct PanelLayout: View {
         }
         .frame(width: 700, height: 500)
         .modifier(PanelGlassSurface())
+        .onAppear {
+            isSearchFieldFocused = true
+        }
         .task(id: snapshotID) {
             do {
                 let loaded = try await tabGroups.profiles()
@@ -53,6 +57,22 @@ struct PanelLayout: View {
                 profiles = loaded
             } catch {
                 guard !Task.isCancelled else { return }
+            }
+        }
+        .task {
+            // On every hidden-to-visible panel opening: clear previous query, focus input, and refresh.
+            let activations = NotificationCenter.default.notifications(
+                named: AppActions.panelDidOpenNotification
+            ).map { _ in true }
+            for await _ in activations {
+                guard !Task.isCancelled else { return }
+                hoveredTab = nil
+                searchText = ""
+                snapshotID = UUID()
+                isSearchFieldFocused = false
+                Task { @MainActor in
+                    isSearchFieldFocused = true
+                }
             }
         }
         .task {
@@ -69,18 +89,34 @@ struct PanelLayout: View {
     }
 
     private var searchBubble: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 11) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 20, weight: .regular))
+                .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            TextField("Search history, enter a URL, or search Google", text: $searchText)
+            TextField("Search tabs, history, enter a URL, or search Google", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 20))
-                .frame(height: 32)
-                .accessibilityLabel("Search history, enter a URL, or search Google")
+                .font(.system(size: 17, weight: .regular))
+                .foregroundStyle(.primary)
+                .frame(height: 30)
+                .focused($isSearchFieldFocused)
+                .accessibilityLabel("Search tabs, history, enter a URL, or search Google")
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 15))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .accessibilityLabel("Clear search")
+            }
         }
-        .padding(.horizontal, 18)
+        .padding(.horizontal, 16)
         .frame(height: Self.headerControlHeight)
         .frame(maxWidth: .infinity)
         .modifier(HeaderBubbleGlassSurface(shape: Capsule()))
@@ -90,20 +126,25 @@ struct PanelLayout: View {
 private struct HeaderBubbleGlassSurface<S: InsettableShape>: ViewModifier {
     let shape: S
     var interactive = false
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
+        let rimColor = colorScheme == .dark
+            ? Color.white.opacity(contrast == .increased ? 0.30 : 0.16)
+            : Color.black.opacity(contrast == .increased ? 0.22 : 0.08)
         if reduceTransparency {
             content
-                .background(Color(nsColor: .windowBackgroundColor), in: shape)
+                .background(Color(nsColor: .controlBackgroundColor), in: shape)
                 .overlay {
-                    shape.strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                    shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
                 }
         } else {
             content
                 .glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
                 .overlay {
-                    shape.strokeBorder(Color.white.opacity(0.20), lineWidth: 0.75)
+                    shape.strokeBorder(rimColor, lineWidth: 0.75)
                 }
         }
     }
@@ -129,12 +170,12 @@ private struct OptionsMenu: View {
                 launchAtStartupEnabled = actions.launchAtStartupEnabled
             }
             Divider()
-            Button("Quit", action: actions.quit)
+            Button("Quit", systemImage: "power", action: actions.quit)
         } label: {
             Image(systemName: "gearshape")
-                .font(.system(size: 19, weight: .regular))
+                .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 56, height: 56)
+                .frame(width: 52, height: 52)
                 .contentShape(Circle())
                 .modifier(HeaderBubbleGlassSurface(shape: Circle(), interactive: true))
         }

@@ -3,7 +3,7 @@ import Foundation
 
 /// Reads the tabs Safari exposes in its live windows. Safari's scripting dictionary
 /// does not expose profile, tab-group, pinned status, or a persistent tab identifier.
-struct AppleScriptTabSupplier: Sendable {
+final class AppleScriptTabSupplier: @unchecked Sendable {
     struct Record: Sendable {
         let url: String
         let title: String
@@ -48,11 +48,36 @@ struct AppleScriptTabSupplier: Sendable {
     return tabRows
     """
 
+    private let lock = NSLock()
+    private var compiledScript: NSAppleScript?
+
     func readTabs() throws -> [Record] {
         try Task.checkCancellation()
-        guard let script = NSAppleScript(source: Self.source) else {
-            throw SafariScriptError.failed("Could not create the tab-reading script.")
+        guard !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").isEmpty else {
+            return []
         }
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        let script: NSAppleScript
+        if let existing = compiledScript {
+            script = existing
+        } else {
+            guard let created = NSAppleScript(source: Self.source) else {
+                throw SafariScriptError.failed("Could not create the tab-reading script.")
+            }
+            var compileError: NSDictionary?
+            created.compileAndReturnError(&compileError)
+            if let compileError {
+                throw SafariScriptError.failed(
+                    compileError[NSAppleScript.errorMessage] as? String ?? "Could not compile the tab-reading script."
+                )
+            }
+            compiledScript = created
+            script = created
+        }
+
         var error: NSDictionary?
         let response = script.executeAndReturnError(&error)
         if let error {
@@ -73,8 +98,11 @@ struct AppleScriptTabSupplier: Sendable {
         guard response.descriptorType == typeAEList else {
             throw SafariScriptError.failed("Safari returned an unexpected tab list.")
         }
-        guard response.numberOfItems > 0 else { return [] }
-        return try (1...response.numberOfItems).map { index in
+        let count = response.numberOfItems
+        guard count > 0 else { return [] }
+        var result: [Record] = []
+        result.reserveCapacity(count)
+        for index in 1...count {
             guard let row = response.atIndex(index), row.numberOfItems == 7,
                   let url = row.atIndex(1)?.stringValue,
                   let title = row.atIndex(2)?.stringValue,
@@ -85,16 +113,19 @@ struct AppleScriptTabSupplier: Sendable {
                   let selected = row.atIndex(7) else {
                 throw SafariScriptError.failed("Safari returned an incomplete tab record.")
             }
-            return Record(
-                url: url,
-                title: title,
-                windowID: windowID,
-                windowIndex: Int(windowIndex.int32Value),
-                windowTitle: windowTitle,
-                tabIndex: Int(tabIndex.int32Value),
-                selected: selected.booleanValue
+            result.append(
+                Record(
+                    url: url,
+                    title: title,
+                    windowID: windowID,
+                    windowIndex: Int(windowIndex.int32Value),
+                    windowTitle: windowTitle,
+                    tabIndex: Int(tabIndex.int32Value),
+                    selected: selected.booleanValue
+                )
             )
         }
+        return result
     }
 }
 

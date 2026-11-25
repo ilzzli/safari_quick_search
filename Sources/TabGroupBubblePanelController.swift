@@ -2,13 +2,23 @@ import AppKit
 import SwiftUI
 
 /// Hosts `TabGroupBubbleView` in a floating, non-activating, click-through `NSPanel`
-/// centered over Safari's frontmost window while scrubbing between tab groups.
+/// positioned cleanly above the search panel (when visible) or near the top of Safari's window.
 @MainActor
 final class TabGroupBubblePanelController: TabGroupBubblePresenterInterface {
+    /// Matches `TabGroupBubbleView`'s outer transparent shadow/animation padding (`24pt`).
+    private static let viewOuterPadding: CGFloat = 24
+    /// Visual gap between the search panel's top border and the bubble's bottom border.
+    private static let gapAboveSearchPanel: CGFloat = 10
+
+    private let searchPanelFrameProvider: @MainActor () -> NSRect?
     private let model = TabGroupBubbleModel()
     private var panel: NSPanel?
     private var hostingView: NSHostingView<TabGroupBubbleView>?
     private var hideTask: Task<Void, Never>?
+
+    init(searchPanelFrameProvider: @escaping @MainActor () -> NSRect? = { nil }) {
+        self.searchPanelFrameProvider = searchPanelFrameProvider
+    }
 
     func show(
         groups: [SafariTabGroupOption],
@@ -28,7 +38,7 @@ final class TabGroupBubblePanelController: TabGroupBubblePresenterInterface {
         if let hostingView {
             hostingView.layoutSubtreeIfNeeded()
             let size = hostingView.fittingSize
-            let targetFrame = centeredFrame(size: size, over: safariWindowFrame)
+            let targetFrame = positionedFrame(size: size, safariFrame: safariWindowFrame)
             panel.setFrame(targetFrame, display: true)
         }
 
@@ -89,11 +99,38 @@ final class TabGroupBubblePanelController: TabGroupBubblePresenterInterface {
         return panel
     }
 
-    private func centeredFrame(size: NSSize, over safariFrame: NSRect?) -> NSRect {
-        let referenceFrame = safariFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
-        let originX = round(referenceFrame.midX - size.width / 2)
-        // Float slightly above vertical center of Safari's window so it's immediately in view.
-        let originY = round(referenceFrame.minY + referenceFrame.height * 0.54 - size.height / 2)
-        return NSRect(x: originX, y: originY, width: ceil(size.width), height: ceil(size.height))
+    private func positionedFrame(size: NSSize, safariFrame: NSRect?) -> NSRect {
+        let width = ceil(size.width)
+        let height = ceil(size.height)
+
+        // When the Quick Search panel is open, place the bubble horizontally centered
+        // directly above the panel's top edge (matching the screenshot layout).
+        if let searchFrame = searchPanelFrameProvider() {
+            let screen = NSScreen.screens.first(where: { $0.frame.intersects(searchFrame) }) ?? NSScreen.main
+            let originX = round(searchFrame.midX - width / 2)
+            var originY = round(searchFrame.maxY + Self.gapAboveSearchPanel - Self.viewOuterPadding)
+            if let visible = screen?.visibleFrame {
+                let maxOriginY = visible.maxY - height + Self.viewOuterPadding - 4
+                originY = min(originY, round(maxOriginY))
+            }
+            return NSRect(x: originX, y: originY, width: width, height: height)
+        }
+
+        // Otherwise, place the bubble horizontally centered in the upper HUD zone
+        // (matching where above-the-centered-panel sits on screen / below Safari's toolbar).
+        let screen = safariFrame.flatMap { sf in
+            NSScreen.screens.first(where: { $0.frame.intersects(sf) })
+        } ?? NSScreen.main
+        let visible = screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
+        let referenceFrame = safariFrame ?? visible
+
+        let originX = round(referenceFrame.midX - width / 2)
+        let idealVisualBottomY = visible.midY + 250 + Self.gapAboveSearchPanel
+        let maxSafariVisualTopY = referenceFrame.maxY - 62
+        let visualHeight = max(height - Self.viewOuterPadding * 2, 36)
+        let clampedVisualBottomY = min(idealVisualBottomY, maxSafariVisualTopY - visualHeight)
+        let originY = round(max(clampedVisualBottomY - Self.viewOuterPadding, referenceFrame.minY + 40))
+
+        return NSRect(x: originX, y: originY, width: width, height: height)
     }
 }

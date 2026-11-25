@@ -20,20 +20,26 @@ actor TabSupplier: TabSupplierInterface {
     func tabs(matching input: String, snapshotID: UUID) async throws -> [TabItem] {
         activeTicket?.cancel()
         if !input.isEmpty && openSnapshotID == snapshotID {
-            try await Task.sleep(for: .milliseconds(250))
+            try await Task.sleep(for: .milliseconds(160))
         }
-        let openTabs = try await loadedOpenTabs(snapshotID: snapshotID)
         let ticket = SearchTicket()
         activeTicket = ticket
         defer { if activeTicket === ticket { activeTicket = nil } }
+
         let phrase = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let store = historyStore
-        let entries = try await withTaskCancellationHandler {
-            try Task.checkCancellation()
-            return try store.search(phrase, ticket: ticket)
+
+        async let openTabsTask = loadedOpenTabs(snapshotID: snapshotID)
+        async let historyTask = withTaskCancellationHandler {
+            try await Task.detached(priority: .userInitiated) {
+                try Task.checkCancellation()
+                return try store.search(phrase, ticket: ticket)
+            }.value
         } onCancel: {
             ticket.cancel()
         }
+
+        let (openTabs, entries) = try await (openTabsTask, historyTask)
         return Self.orderedTabs(history: entries, openTabs: openTabs, input: input)
     }
 
@@ -54,15 +60,18 @@ actor TabSupplier: TabSupplierInterface {
     ) -> [TabItem] {
         let phrase = input.trimmingCharacters(in: .whitespacesAndNewlines)
         let openByURL = Dictionary(grouping: openTabs) { TabStore.pageURL($0.url) }
+        let historyByURL = Dictionary(grouping: history) { TabStore.pageURL($0.url) }
         var seenOpenURLs = Set<String>()
         var openItems: [TabItem] = []
+        openItems.reserveCapacity(min(openByURL.count, 20))
+
         for tab in openTabs {
             guard phrase.isEmpty || tab.title.localizedCaseInsensitiveContains(phrase)
                 || tab.url.localizedCaseInsensitiveContains(phrase) else { continue }
             let key = TabStore.pageURL(tab.url)
             guard seenOpenURLs.insert(key).inserted else { continue }
             let matches = openByURL[key] ?? [tab]
-            let historyMatches = history.filter { TabStore.pageURL($0.url) == key }
+            let historyMatches = historyByURL[key] ?? []
             let title = matches.first(where: { !$0.title.isEmpty })?.title
                 ?? historyMatches.first?.title ?? tab.url
             openItems.append(

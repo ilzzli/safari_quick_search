@@ -1,6 +1,6 @@
 import AppKit
 
-/// Placeholder actions until Safari navigation is connected.
+/// Debug inspection `TabActionInterface` implementation (preserved alongside `SafariTabActions`).
 @MainActor
 final class TabActions: TabActionInterface {
     private var isLookingUpHistory = false

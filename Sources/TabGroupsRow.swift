@@ -12,7 +12,7 @@ struct TabGroupsRow: View {
                 .lineLimit(1)
                 .fixedSize()
                 .foregroundStyle(highlightedGroups.isEmpty ? Color.secondary : Color.primary)
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 if profile.groups.isEmpty {
                     Text("No tab groups").font(.caption).foregroundStyle(.secondary)
                 }
@@ -24,16 +24,17 @@ struct TabGroupsRow: View {
                         .fixedSize()
                         .font(.caption)
                         .fontWeight(isHighlighted ? .semibold : .regular)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
+                        .foregroundStyle(isHighlighted ? Color.accentColor : .primary)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 5)
                         .background(
-                            isHighlighted ? Color.yellow.opacity(0.18)
-                                : Color.secondary.opacity(0.07),
+                            isHighlighted ? Color.accentColor.opacity(0.15)
+                                : Color.primary.opacity(0.05),
                             in: Capsule()
                         )
                         .overlay {
                             Capsule()
-                                .strokeBorder(isHighlighted ? Color.yellow.opacity(0.65) : Color.secondary.opacity(0.12), lineWidth: 1)
+                                .strokeBorder(isHighlighted ? Color.accentColor.opacity(0.38) : Color.primary.opacity(0.10), lineWidth: 0.75)
                         }
                         .accessibilityAddTraits(group.isActive ? .isSelected : [])
                 }
@@ -41,11 +42,11 @@ struct TabGroupsRow: View {
         }
         .fixedSize(horizontal: true, vertical: true)
         .padding(12)
-        .background(Color.secondary.opacity(0.035), in: RoundedRectangle(cornerRadius: 12))
+        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(highlightedGroups.isEmpty ? Color.secondary.opacity(0.12) : Color.yellow.opacity(0.4),
-                              lineWidth: 1)
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(highlightedGroups.isEmpty ? Color.primary.opacity(0.10) : Color.accentColor.opacity(0.38),
+                              lineWidth: 0.75)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(profile.title + " tab groups")

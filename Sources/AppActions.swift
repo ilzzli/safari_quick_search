@@ -11,6 +11,11 @@ final class AppActions: AppActionsInterface {
         panel?.isVisible == true
     }
 
+    var panelFrame: NSRect? {
+        guard let panel, panel.isVisible else { return nil }
+        return panel.frame
+    }
+
     func attachPanel(_ panel: NSPanel) {
         self.panel = panel
     }

@@ -17,9 +17,9 @@ final class SafariTabActions: TabActionInterface {
     func openHistory(_ tab: TabItem) async {
         let forceNewTab = NSEvent.modifierFlags.contains(.command)
         if !forceNewTab, tab.type == .OPENED_TAB, !tab.openTabs.isEmpty {
+            onComplete()
             let didFocus = await focusBestOpenedTab(from: tab.openTabs)
             if didFocus {
-                onComplete()
                 return
             }
         }
@@ -31,6 +31,7 @@ final class SafariTabActions: TabActionInterface {
             )
             return
         }
+        onComplete()
         await openInUpfrontSafariWindow(url: url)
     }
 
@@ -38,6 +39,7 @@ final class SafariTabActions: TabActionInterface {
         var components = URLComponents(string: "https://www.google.com/search")
         components?.queryItems = [URLQueryItem(name: "q", value: tab.value)]
         guard let url = components?.url else { return }
+        onComplete()
         Task { @MainActor in
             await openInUpfrontSafariWindow(url: url)
         }
@@ -51,6 +53,7 @@ final class SafariTabActions: TabActionInterface {
             )
             return
         }
+        onComplete()
         Task { @MainActor in
             await openInUpfrontSafariWindow(url: url)
         }
@@ -124,6 +127,20 @@ final class SafariTabActions: TabActionInterface {
     // MARK: - Open URL in Upfront Safari Window
 
     private func openInUpfrontSafariWindow(url: URL) async {
+        // When Safari is not running at all, launch it with the URL directly via NSWorkspace
+        // instead of blocking on a cold AppleScript startup timeout.
+        if Self.safariPID() == nil,
+           let safariAppURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            do {
+                _ = try await NSWorkspace.shared.open([url], withApplicationAt: safariAppURL, configuration: config)
+                return
+            } catch {
+                // Fall back to AppleScript below if NSWorkspace launch fails.
+            }
+        }
+
         let preferredWindowID = Self.frontmostOnScreenSafariWindowID() ?? 0
         let script = Self.openURLScript(url: url, preferredWindowID: preferredWindowID)
         let result = await Self.executeAppleScript(script)
@@ -135,7 +152,6 @@ final class SafariTabActions: TabActionInterface {
 
         let targetWindowID = result.output.flatMap(Int.init) ?? preferredWindowID
         activateAndRaiseSafari(windowID: targetWindowID > 0 ? targetWindowID : nil)
-        onComplete()
     }
 
     private func resolvedURL(from raw: String) -> URL? {
@@ -242,10 +258,12 @@ final class SafariTabActions: TabActionInterface {
                   CFGetTypeID(sizeVal) == AXValueGetTypeID() else {
                 continue
             }
+            let axPos = unsafeBitCast(posVal, to: AXValue.self)
+            let axSize = unsafeBitCast(sizeVal, to: AXValue.self)
             var pos = CGPoint.zero
             var size = CGSize.zero
-            AXValueGetValue(posVal as! AXValue, .cgPoint, &pos)
-            AXValueGetValue(sizeVal as! AXValue, .cgSize, &size)
+            AXValueGetValue(axPos, .cgPoint, &pos)
+            AXValueGetValue(axSize, .cgSize, &size)
 
             if abs(pos.x - targetBounds.origin.x) <= 2,
                abs(pos.y - targetBounds.origin.y) <= 2,

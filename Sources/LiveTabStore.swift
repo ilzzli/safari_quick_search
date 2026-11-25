@@ -18,10 +18,17 @@ actor LiveTabStore {
     private let database = TabStore()
 
     func tabs() async throws -> [SafariTabMatch] {
-        let live = try reader.readTabs()
-        try Task.checkCancellation()
-        let windows = try Self.windows()
-        let saved = try await database.allTabs()
+        let reader = self.reader
+        let database = self.database
+        async let liveTask = Task.detached(priority: .userInitiated) {
+            try reader.readTabs()
+        }.value
+        async let windowsTask = Task.detached(priority: .userInitiated) {
+            try Self.windows()
+        }.value
+        async let savedTask = database.allTabs()
+
+        let (live, windows, saved) = try await (liveTask, windowsTask, savedTask)
         try Task.checkCancellation()
         return Self.combine(live: live, windows: windows, saved: saved)
     }
@@ -31,7 +38,20 @@ actor LiveTabStore {
         windows: [SafariWindowMetadata],
         saved: [SafariTabMatch]
     ) -> [SafariTabMatch] {
+        guard !live.isEmpty else { return [] }
         let liveWindows = Dictionary(grouping: live, by: \.windowID)
+        var savedByWindowID: [Int64: [SafariTabMatch]] = [:]
+        var savedURLSetByWindowID: [Int64: Set<String>] = [:]
+        var savedByWindowAndPageURL: [Int64: [String: [SafariTabMatch]]] = [:]
+
+        for match in saved {
+            guard let winID = match.windowID else { continue }
+            let normalizedURL = TabStore.pageURL(match.url)
+            savedByWindowID[winID, default: []].append(match)
+            savedURLSetByWindowID[winID, default: []].insert(normalizedURL)
+            savedByWindowAndPageURL[winID, default: [:]][normalizedURL, default: []].append(match)
+        }
+
         var associations: [String: SafariWindowMetadata] = [:]
         for (id, tabs) in liveWindows {
             let archived = windows.filter { $0.restoredWindowIDs.contains(id) }
@@ -42,9 +62,9 @@ actor LiveTabStore {
             // A unique exact URL-set match is a fallback when restoration IDs
             // are unavailable. Ambiguous windows stay unassigned.
             let urls = Set(tabs.map { TabStore.pageURL($0.url) })
+            guard !urls.isEmpty else { continue }
             let candidates = windows.filter { window in
-                let storedURLs = Set(saved.filter { $0.windowID == window.id }.map { TabStore.pageURL($0.url) })
-                return !urls.isEmpty && urls == storedURLs
+                savedURLSetByWindowID[window.id] == urls
             }
             if candidates.count == 1 { associations[id] = candidates[0] }
         }
@@ -53,10 +73,8 @@ actor LiveTabStore {
         return live.map { tab in
             let candidate = associations[tab.windowID]
             let window = candidate.flatMap { counts[$0.id] == 1 ? $0 : nil }
-            let stored = saved.filter {
-                $0.windowID == window?.id && window != nil
-                    && TabStore.pageURL($0.url) == TabStore.pageURL(tab.url)
-            }
+            let normalizedURL = TabStore.pageURL(tab.url)
+            let stored = window.flatMap { savedByWindowAndPageURL[$0.id]?[normalizedURL] } ?? []
             let metadata = stored.count == 1 ? stored.first : nil
             return SafariTabMatch(
                 tabID: metadata?.tabID ?? -Int64(tab.tabIndex),

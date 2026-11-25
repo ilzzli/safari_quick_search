@@ -18,26 +18,50 @@ struct TabResults: View {
     @State private var selectedID: TabItem.ID?
     @State private var items: [TabItem] = []
     @State private var isRefreshing = true
+    @State private var hasCurrentInputItems = false
+    @State private var userMovedSelection = false
     @State private var errorMessage: String?
     @State private var showAllWindowsInPopup = false
     @State private var lastLoadedSnapshotID: UUID?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        Group {
             if let errorMessage {
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28, weight: .light))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Text(errorMessage)
                         .multilineTextAlignment(.center)
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: 460)
                     Button("Retry") { snapshotID = UUID() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(.top, 4)
                 }
+                .padding(.horizontal, 28)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if items.isEmpty {
-                Text("No results found.")
-                    .foregroundStyle(.secondary)
-                    .opacity(isRefreshing ? 0 : 1)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 26, weight: .light))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                    Text("No Matching Results")
+                        .font(.system(size: 15, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    if !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("Try a different title, address, or search phrase.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .opacity(isRefreshing ? 0 : 1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 TabList(
                     items: items,
@@ -62,20 +86,14 @@ struct TabResults: View {
                 }
             )
         )
-        .task {
-            // Refresh only on a hidden-to-visible transition, not when an alert
-            // closes or the panel regains keyboard focus.
-            let activations = NotificationCenter.default.notifications(
-                named: AppActions.panelDidOpenNotification
-            ).map { _ in true }
-            for await _ in activations {
-                guard !Task.isCancelled else { return }
-                snapshotID = UUID()
-            }
-        }
         .task(id: Request(input: input, snapshotID: snapshotID)) {
+            let hasInput = !input.isEmpty
             hoveredTab = nil
-            selectedID = nil
+            if !hasInput {
+                selectedID = nil
+            }
+            userMovedSelection = false
+            hasCurrentInputItems = false
             isRefreshing = true
             errorMessage = nil
             let isSameSnapshot = lastLoadedSnapshotID == snapshotID
@@ -84,12 +102,21 @@ struct TabResults: View {
                     let cached = try await supplier.cachedTabs(matching: input, snapshotID: snapshotID)
                     try Task.checkCancellation()
                     items = cached
+                    selectedID = hasInput ? cached.first?.id : nil
+                    hasCurrentInputItems = true
+                } else {
+                    selectedID = nil
                 }
                 let loaded = try await supplier.tabs(matching: input, snapshotID: snapshotID)
                 try Task.checkCancellation()
                 items = loaded
                 lastLoadedSnapshotID = snapshotID
-                if !items.contains(where: { $0.id == selectedID }) { selectedID = nil }
+                if userMovedSelection, items.contains(where: { $0.id == selectedID }) {
+                    // Keep the row explicitly selected via keyboard while results refreshed.
+                } else {
+                    selectedID = hasInput ? loaded.first?.id : nil
+                }
+                hasCurrentInputItems = true
             } catch {
                 guard !Task.isCancelled else { return }
                 errorMessage = error.localizedDescription
@@ -99,7 +126,7 @@ struct TabResults: View {
     }
 
     private func handleKey(_ code: UInt16, shift: Bool) -> Bool {
-        guard !isRefreshing, errorMessage == nil, !items.isEmpty else { return false }
+        guard hasCurrentInputItems, errorMessage == nil, !items.isEmpty else { return false }
         let isTab = code == UInt16(kVK_Tab)
         let isDownArrow = code == UInt16(kVK_DownArrow)
         let isUpArrow = code == UInt16(kVK_UpArrow)
@@ -109,6 +136,7 @@ struct TabResults: View {
             let step = backwards ? -1 : 1
             let next = current.map { ($0 + step + items.count) % items.count }
                 ?? (backwards ? items.count - 1 : 0)
+            userMovedSelection = true
             selectedID = items[next].id
             return true
         }
