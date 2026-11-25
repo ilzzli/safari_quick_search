@@ -20,17 +20,17 @@ final class BubbleSafariSwipeHandler: SafariSwipeHandlerInterface {
 
     private let scrubMonitor: any SwipeScrubMonitorInterface
     private let shortcutSwitcher: ShortcutTabGroupSwitcher
-    private let bubbleController: TabGroupBubblePanelController
+    private let bubblePresenter: any TabGroupBubblePresenterInterface
     private var session: ActiveSession?
 
     init(
         scrubMonitor: any SwipeScrubMonitorInterface,
         shortcutSwitcher: ShortcutTabGroupSwitcher,
-        bubbleController: TabGroupBubblePanelController? = nil
+        bubblePresenter: (any TabGroupBubblePresenterInterface)? = nil
     ) {
         self.scrubMonitor = scrubMonitor
         self.shortcutSwitcher = shortcutSwitcher
-        self.bubbleController = bubbleController ?? TabGroupBubblePanelController()
+        self.bubblePresenter = bubblePresenter ?? TabGroupBubblePanelController()
     }
 
     var isSafariFocused: Bool {
@@ -46,7 +46,7 @@ final class BubbleSafariSwipeHandler: SafariSwipeHandlerInterface {
     func stop() {
         scrubMonitor.stop()
         session = nil
-        bubbleController.dismiss(immediate: true)
+        bubblePresenter.dismiss(immediate: true)
     }
 
     private func handleScrubEvent(_ event: SwipeScrubEvent) {
@@ -66,7 +66,7 @@ final class BubbleSafariSwipeHandler: SafariSwipeHandlerInterface {
             SwipeLogger.debug(
                 "Bubble began: active=\(snapshot.activeIndex.map(String.init) ?? "none") groups=[\(snapshot.groups.map(\.title).joined(separator: ", "))]"
             )
-            bubbleController.show(
+            bubblePresenter.show(
                 groups: snapshot.groups,
                 initialActiveIndex: snapshot.activeIndex,
                 selectedIndex: snapshot.activeIndex,
@@ -82,7 +82,7 @@ final class BubbleSafariSwipeHandler: SafariSwipeHandlerInterface {
 
         case .cancelled:
             session = nil
-            bubbleController.dismiss(immediate: true)
+            bubblePresenter.dismiss(immediate: true)
         }
     }
 
@@ -167,13 +167,13 @@ final class BubbleSafariSwipeHandler: SafariSwipeHandlerInterface {
         }
 
         session = currentSession
-        bubbleController.update(selectedIndex: currentSession.selectedIndex, magneticPull: magneticPull)
+        bubblePresenter.update(selectedIndex: currentSession.selectedIndex, magneticPull: magneticPull)
     }
 
     private func commitAndDismiss(finalDeltaX: CGFloat) {
         let finished = session
         session = nil
-        bubbleController.dismiss()
+        bubblePresenter.dismiss()
 
         guard isSafariFocused else { return }
 

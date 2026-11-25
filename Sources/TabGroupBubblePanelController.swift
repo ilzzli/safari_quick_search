@@ -4,7 +4,7 @@ import SwiftUI
 /// Hosts `TabGroupBubbleView` in a floating, non-activating, click-through `NSPanel`
 /// centered over Safari's frontmost window while scrubbing between tab groups.
 @MainActor
-final class TabGroupBubblePanelController {
+final class TabGroupBubblePanelController: TabGroupBubblePresenterInterface {
     private let model = TabGroupBubbleModel()
     private var panel: NSPanel?
     private var hostingView: NSHostingView<TabGroupBubbleView>?

@@ -73,7 +73,6 @@ struct PanelLayout: View {
     @State private var hoveredTab: TabItem?
     @State private var snapshotID = UUID()
     @State private var profiles: [SafariProfileGroups] = []
-    @State private var profilesError: String?
     @State private var currentTabGroupIndex = 0
 
     private func switchTestTabGroup(offset: Int) {
@@ -86,41 +85,6 @@ struct PanelLayout: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TabGroupsSection(
-                profiles: profiles,
-                errorMessage: profilesError,
-                hoveredTab: hoveredTab
-            )
-            .padding(.horizontal, 24)
-            .padding(.top, 18)
-
-            HStack(spacing: 14) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 25, weight: .light))
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                TextField("Search history, enter a URL, or search Google", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 23))
-                    .frame(height: 38)
-                    .accessibilityLabel("Search history, enter a URL, or search Google")
-                Button(action: actions.hidePanel) {
-                    Text("esc")
-                        .font(.caption.monospaced())
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(.quaternary, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Hide panel")
-                .keyboardShortcut(.cancelAction)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 22)
-
-            Divider().opacity(0.45)
-
             TabResults(
                 supplier: tabSupplier,
                 profiles: profiles,
@@ -129,6 +93,13 @@ struct PanelLayout: View {
                 snapshotID: $snapshotID
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .scrollEdgeEffectStyle(.soft, for: .top)
+            .safeAreaBar(edge: .top, spacing: 0) {
+                searchBubble
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 10)
+            }
             .zIndex(1)
 
             Divider().opacity(0.45)
@@ -163,15 +134,62 @@ struct PanelLayout: View {
         .frame(width: 700, height: 500)
         .modifier(PanelGlassSurface())
         .task(id: snapshotID) {
-            profilesError = nil
             do {
                 let loaded = try await tabGroups.profiles()
                 try Task.checkCancellation()
                 profiles = loaded
             } catch {
                 guard !Task.isCancelled else { return }
-                profilesError = error.localizedDescription
             }
+        }
+    }
+
+    private var searchBubble: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField("Search history, enter a URL, or search Google", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(.system(size: 20))
+                .frame(height: 32)
+                .accessibilityLabel("Search history, enter a URL, or search Google")
+            Button(action: actions.hidePanel) {
+                Text("esc")
+                    .font(.caption.monospaced())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(.quaternary, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel("Hide panel")
+            .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .modifier(SearchBubbleGlassSurface())
+    }
+}
+
+private struct SearchBubbleGlassSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    func body(content: Content) -> some View {
+        let shape = Capsule()
+        if reduceTransparency {
+            content
+                .background(Color(nsColor: .windowBackgroundColor), in: shape)
+                .overlay {
+                    shape.strokeBorder(Color.primary.opacity(0.18), lineWidth: 1)
+                }
+        } else {
+            content
+                .glassEffect(.regular, in: shape)
+                .overlay {
+                    shape.strokeBorder(Color.white.opacity(0.20), lineWidth: 0.75)
+                }
         }
     }
 }

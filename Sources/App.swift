@@ -11,9 +11,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let shortcutTabGroupSwitcher = ShortcutTabGroupSwitcher(
         fallback: SafariControl()
     )
+    private lazy var bubblePresenter: any TabGroupBubblePresenterInterface = TabGroupBubblePanelController()
     private lazy var swipeHandler: any SafariSwipeHandlerInterface = BubbleSafariSwipeHandler(
         scrubMonitor: SystemSwipeScrubMonitor(),
-        shortcutSwitcher: shortcutTabGroupSwitcher
+        shortcutSwitcher: shortcutTabGroupSwitcher,
+        bubblePresenter: bubblePresenter
     )
     // Swap to `DiscreteSafariSwipeHandler(swipeMonitor: SystemSwipeOnReleaseMonitor(), switcher: shortcutTabGroupSwitcher)`
     // (or `SystemSwipeEventMonitor()` / `ThreeFingerSwipeMonitor()` / `SafariControl()`) to switch approaches in one place.

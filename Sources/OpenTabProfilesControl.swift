@@ -35,12 +35,13 @@ struct OpenTabProfilesPopupOverlay: View {
     let anchors: [TabItem.ID: Anchor<CGRect>]
     let proxy: GeometryProxy
 
+    private static let boundaryPadding: CGFloat = 10
+
     @State private var displayedItem: TabItem?
     @State private var appearProgress: CGFloat = 0
     @State private var glideGeneration = 0
     @State private var dismissTask: Task<Void, Never>?
     @State private var measuredSizes: [TabItem.ID: CGSize] = [:]
-    @State private var frozenHoverCenterY: CGFloat?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -119,6 +120,7 @@ struct OpenTabProfilesPopupOverlay: View {
             for item in items where item.type == .OPENED_TAB {
                 guard let anchor = anchors[item.id] else { continue }
                 let rect = proxy[anchor]
+                guard rect.maxY > 0 else { continue }
                 let distance = abs(rect.midY - point.y)
                 if distance <= 36 && distance < closestDistance {
                     closestDistance = distance
@@ -143,36 +145,28 @@ struct OpenTabProfilesPopupOverlay: View {
         ZStack(alignment: .bottomTrailing) {
             if let item = currentItem, let anchor = anchors[item.id] {
                 let iconRect = proxy[anchor]
-                let isWithinVisibleBounds = iconRect.minY >= 0 && iconRect.maxY <= proxy.size.height
-                let effectiveProgress = isWithinVisibleBounds ? appearProgress : 0
-
                 let targetSize = measuredSizes[item.id]
                 let popupHeight = targetSize?.height ?? 44
                 let halfHeight = popupHeight / 2
-                let rawCenterY = (isPointerHovered && isScrolling)
-                    ? (frozenHoverCenterY ?? iconRect.midY)
-                    : iconRect.midY
-                let clampedCenterY = min(
-                    max(rawCenterY, halfHeight + 4),
-                    max(proxy.size.height - halfHeight - 4, halfHeight + 4)
-                )
+                let minCenterY = halfHeight + Self.boundaryPadding
+                let maxCenterY = max(proxy.size.height - halfHeight - Self.boundaryPadding, minCenterY)
+                let clampedCenterY = min(max(iconRect.midY, minCenterY), maxCenterY)
 
                 popupInnerContent(for: item)
-                    .accessibilityHidden(effectiveProgress == 0)
+                    .accessibilityHidden(appearProgress == 0)
                     .modifier(
                         AnimatablePopupLayoutModifier(
                             width: targetSize?.width,
                             height: targetSize?.height,
                             rightX: iconRect.maxX,
                             centerY: clampedCenterY,
-                            appearProgress: effectiveProgress,
+                            appearProgress: appearProgress,
                             reduceTransparency: reduceTransparency
                         )
                     )
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: liveItem?.id)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.24).delay(0.035), value: liveItem?.id)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.24), value: glideGeneration)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: isWithinVisibleBounds)
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.20), value: isScrolling)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.20), value: clampedCenterY)
             }
         }
         .frame(width: proxy.size.width, height: proxy.size.height)
@@ -202,15 +196,6 @@ struct OpenTabProfilesPopupOverlay: View {
         .onChange(of: showAllWindows) { _, _ in
             glideGeneration &+= 1
         }
-        .onChange(of: isScrolling) { _, scrolling in
-            if scrolling {
-                if isPointerHovered, let item = resolvedActiveItem ?? displayedItem, let anchor = anchors[item.id] {
-                    frozenHoverCenterY = proxy[anchor].midY
-                }
-            } else {
-                frozenHoverCenterY = nil
-            }
-        }
     }
 
     private func syncPopupState() {
@@ -220,9 +205,6 @@ struct OpenTabProfilesPopupOverlay: View {
         if let activeItem = resolvedActiveItem, anchors[activeItem.id] != nil {
             let wasHidden = (displayedItem == nil && appearProgress == 0)
             displayedItem = activeItem
-            if isPointerHovered, !isScrolling, let anchor = anchors[activeItem.id] {
-                frozenHoverCenterY = proxy[anchor].midY
-            }
             if wasHidden {
                 Task { @MainActor in
                     guard self.resolvedActiveItem != nil else { return }
@@ -250,7 +232,6 @@ struct OpenTabProfilesPopupOverlay: View {
                 }
                 guard !Task.isCancelled, self.resolvedActiveItem == nil else { return }
                 self.displayedItem = nil
-                self.frozenHoverCenterY = nil
             }
         }
     }
@@ -265,24 +246,21 @@ struct OpenTabProfilesPopupOverlay: View {
             }
             ForEach(Array(itemProfiles.enumerated()), id: \.offset) { _, profile in
                 VStack(alignment: .leading, spacing: 4) {
-                    Label(profile.name, systemImage: "person.crop.circle")
+                    Text(profile.name)
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(profile.hasMatch ? .primary : .secondary)
                     if showAllWindows {
                         HStack(spacing: 4) {
                             ForEach(Array(profile.groups.enumerated()), id: \.offset) { _, group in
-                                Label(
-                                    group.title,
-                                    systemImage: group.isHighlighted ? "checkmark.circle.fill" : "rectangle.on.rectangle"
-                                )
-                                .font(.caption2.weight(group.isHighlighted ? .semibold : .regular))
-                                .foregroundStyle(group.isHighlighted ? .primary : .secondary)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(
-                                    group.isHighlighted ? Color.yellow.opacity(0.22) : Color.secondary.opacity(0.08),
-                                    in: Capsule()
-                                )
+                                Text(group.title)
+                                    .font(.caption2.weight(group.isHighlighted ? .semibold : .regular))
+                                    .foregroundStyle(group.isHighlighted ? .primary : .secondary)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        group.isHighlighted ? Color.yellow.opacity(0.22) : Color.secondary.opacity(0.08),
+                                        in: Capsule()
+                                    )
                             }
                         }
                     } else {

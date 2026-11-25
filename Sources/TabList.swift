@@ -133,9 +133,12 @@ struct TabList: View {
     ) -> TabItem.ID? {
         guard !isRefreshing else { return nil }
         if hoveredID != nil, let point = pointerLocation {
+            let topInset = proxy.safeAreaInsets.top
+            guard point.y >= topInset else { return hoveredID }
             for item in items {
                 guard let anchor = rowAnchors[item.id] else { continue }
                 let rect = proxy[anchor].insetBy(dx: 0, dy: -3)
+                guard rect.maxY > topInset else { continue }
                 if rect.contains(point) {
                     return item.id
                 }
